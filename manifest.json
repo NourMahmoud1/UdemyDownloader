@@ -14,7 +14,7 @@
    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxFgGZLyfCfrFtwARHigrTo0W4W4ukvSjrerGdmmTj2mGUURQtkFzNJnqR9Gf4vioOSeQa20VWPZf0k1Dx32pYYVvLlx5xXDNhs4C3ONkQV5oswdAciAPb6eV5zvp3vi5AzdS4pBVR7nAyF+dFp1KiQZaQhxlJzmyTOtz35ezvnNndnzKHUtcjp6S2fx/eQ6YM0aXBGov97BLFfSLK9MZ6Bop8GaT1u+3XKE06ZzN/a7+3zWUZLsbW4QL1mY6GRq8efz6XmQ5Dq0aO1jHqhHnT2OzWGEIBhuE/+Xw3moehMNwk+VkBpFe1hsJwWOgELybs2GgIung1XHY5iYL5CmhYQIDAQAB",
    "manifest_version": 3,
    "name": "Udemy Downloader",
-   "permissions": [ "downloads", "cookies" ],
+   "permissions": [ "downloads", "cookies", "notifications" ],
    "host_permissions": [ "*://*.udemy.com/*" ],
    "short_name": "Udemy",
    "options_page": "options.html",

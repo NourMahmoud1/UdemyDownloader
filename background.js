@@ -279,9 +279,12 @@ var Application = {
       var i = 1;
       Errors = 0;
       Application.Counter({"Total" : VideoIdList.length});
+      
+      var apiDelay = parseInt(localStorage.getItem('api_delay') || "500", 10);
+      
       await asyncForEach(VideoIdList, async (v, k) => {
         try {
-          await waitFor(0);
+          await waitFor(apiDelay);
       
           var temp = {};
           temp.url = Application.Domain + "/api-2.0/users/me/subscribed-courses/" + Application.CourseId + "/lectures/" + v.id;
@@ -594,6 +597,8 @@ var Application = {
     var trid;
     var videoRowIndex;
     var currentPage;
+    var downloadDelay = parseInt(localStorage.getItem('download_delay') || "2000", 10);
+    
     chrome.downloads.onChanged.addListener(onChanged);
 
     next();
@@ -601,6 +606,14 @@ var Application = {
     function next() {
       if (index >= urls.length) {
         chrome.downloads.onChanged.removeListener(onChanged);
+        
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: 'logo.png',
+            title: 'Bulk Download Complete!',
+            message: 'Course bulk download finished successfully. [ ' + urls.length + ' Files ]'
+        });
+        
         callback();
         return;
       }
@@ -629,7 +642,7 @@ var Application = {
       if (completedList.includes(fullFilePath)) {
           console.log("Skipping already downloaded: " + fullFilePath);
           index++;
-          setTimeout(next, 0);
+          setTimeout(next, Math.min(downloadDelay, 0)); // Skip fast if it's already downloaded, but allow event loop to clear
           return;
       }
 
@@ -714,7 +727,7 @@ var Application = {
             $("#SelectedVideos").text("Download Selected Videos");
           }
         }
-        next();
+        setTimeout(next, downloadDelay);
       } else if(id === currentId && id > 0){
 
         setTimeout(()=>{
