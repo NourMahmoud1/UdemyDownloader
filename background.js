@@ -8,11 +8,19 @@ var pageSize = 10;
 
 var Errors = 0;
 var LoadedData ={};
+var selectedQuality = "Auto";
+var downloadSubtitles = false;
 
 video.base = new Array();
 $(document).ready(function(){
 	$('.version').text('v' + chrome.runtime.getManifest().version);
 	$('Title').text(chrome.runtime.getManifest().name + ' v' + chrome.runtime.getManifest().version);
+	$('#quality-select').on('change', function() {
+		selectedQuality = $(this).val();
+	});
+	$('#subtitle-toggle').on('change', function() {
+		downloadSubtitles = $(this).prop('checked');
+	});
 });
 const waitFor = (ms) => new Promise((r) => setTimeout(r, ms));
 const asyncForEach = async (array, callback) => {
@@ -184,7 +192,9 @@ var Application = {
               "VideoUrl": "",
               "VideoTitle": v.object_index + ". " + v.title + " <div class='btn-danger'>ERROR</div>",
               "VideoThumbnail": (VideoDetails.asset.thumbnail_sprite ? VideoDetails.asset.thumbnail_sprite.img_url : ""),
-              "VideoQuality": "Auto"
+              "VideoQuality": "Auto",
+              "VideoQualities": [],
+              "VideoCaptions": []
             }
 
             Errors +=1;
@@ -195,7 +205,9 @@ var Application = {
               "VideoUrl": VideoDetails.asset.stream_urls.Video[0].file,
               "VideoTitle": v.object_index + ". " + v.title,
               "VideoThumbnail": (VideoDetails.asset.thumbnail_sprite ? VideoDetails.asset.thumbnail_sprite.img_url : ""),
-              "VideoQuality": VideoDetails.asset.stream_urls.Video[0].label
+              "VideoQuality": VideoDetails.asset.stream_urls.Video[0].label,
+              "VideoQualities": VideoDetails.asset.stream_urls.Video,
+              "VideoCaptions": VideoDetails.asset.captions || []
             }
           }
           video.base.push(tobepush);
@@ -375,7 +387,7 @@ var Application = {
         var temp = {};
         temp = {
           trid: data,
-          fileurl: VideoDetails.VideoUrl,
+          fileurl: Application.getVideoUrl(VideoDetails),
           foldername:
             FolderName +
             Application.replaceFileName(
@@ -386,6 +398,8 @@ var Application = {
             "/",
           filename:
             Application.replaceFileName(VideoDetails.VideoTitle) + ".mp4",
+          caption: Application.getSubtitleUrl(VideoDetails),
+          captionFilename: Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt",
         };
 
         Downloads.push(temp);
@@ -433,6 +447,8 @@ var Application = {
     var trid;
     var videoRowIndex;
     var currentPage;
+    var resumeAttempts = 0;
+    var MAX_RESUME_ATTEMPTS = 3;
     chrome.downloads.onChanged.addListener(onChanged);
 
     next();
@@ -447,6 +463,8 @@ var Application = {
       const fileurl = urls[index].fileurl;
       const foldername = urls[index].foldername;
       const filename = urls[index].filename;
+      const caption = urls[index].caption;
+      const captionFilename = urls[index].captionFilename;
       trid = urls[index].trid;
       $("#linkTable")
         .dataTable()
@@ -462,6 +480,7 @@ var Application = {
       currentPage -= 1;
 
       index++;
+      resumeAttempts = 0;
       if (fileurl) {
           console.log(foldername + filename);
         chrome.downloads.download(
@@ -473,6 +492,19 @@ var Application = {
           },
           (id) => {
             currentId = id;
+            // Download subtitle alongside the video if available
+            if (caption && captionFilename) {
+              chrome.downloads.download({
+                url: caption,
+                filename: foldername + captionFilename,
+                saveAs: false,
+                conflictAction: "overwrite",
+              }, function(subId) {
+                if (chrome.runtime.lastError) {
+                  console.warn("Subtitle download failed:", chrome.runtime.lastError.message);
+                }
+              });
+            }
           }
         );
 
@@ -480,7 +512,20 @@ var Application = {
     }
 
     function onChanged({ id, state }) {
-      if (id === currentId && state && state.current !== "in_progress") {
+      if (id === currentId && state) {
+        if (state.current === "interrupted") {
+          // Auto-resume interrupted downloads up to MAX_RESUME_ATTEMPTS times
+          if (resumeAttempts < MAX_RESUME_ATTEMPTS) {
+            resumeAttempts++;
+            chrome.downloads.resume(id);
+          } else {
+            console.warn("Download " + id + " failed after " + MAX_RESUME_ATTEMPTS + " resume attempts. Skipping.");
+            resumeAttempts = 0;
+            next();
+          }
+          return;
+        }
+        if (state.current !== "in_progress") {
         // download finish.
         var rows = $("#linkTable").dataTable().$("tr", { filter: "applied" });
         var downloadButton = rows
@@ -534,6 +579,7 @@ var Application = {
           }
         }
         next();
+        }
       } else if(id === currentId && id > 0){
 
         setTimeout(()=>{
@@ -716,6 +762,7 @@ var Application = {
         ];
         $(".sonar-wrapper").hide();
         $(".btn-container").hide();
+        $("#download-settings").hide();
         Application.CreateTable(Application);
         break;
       case "PlayList":
@@ -749,6 +796,7 @@ var Application = {
             text: "&laquo;",
             className: "btn-sm btn-danger btn-width-5 btn-right",
             action: function (e, dt, node, config) {
+              $("#download-settings").hide();
               $(".sonar-wrapper").show();
               $("#example").empty();
               Application.Course();
@@ -756,7 +804,7 @@ var Application = {
           },
           {
             text: "Select All",
-            className: "btn-sm btn-danger btn-width-25 btn-right",
+            className: "btn-sm btn-danger btn-width-20 btn-right",
             attr: {
               id: "SelectAll",
             },
@@ -787,7 +835,7 @@ var Application = {
           },
           {
             text: "Re-Analyze Videos",
-            className: "btn-sm btn-danger btn-width-35 btn-right",
+            className: "btn-sm btn-danger btn-width-25 btn-right",
             action: function (e, dt, node, config) {
               $("#example").empty();
               $(".sonar-wrapper").show();
@@ -798,8 +846,58 @@ var Application = {
             },
           },
           {
+            text: "Download All",
+            className: "btn-sm btn-success btn-width-25 btn-right",
+            action: function (e, dt, node, config) {
+              $("#linkTable").dataTable().fnPageChange(0);
+              Downloads = [];
+              var CourseDetail = $.grep(
+                Application.CourseData.Data.results,
+                function (v) {
+                  return v.id == Application.CourseId;
+                }
+              )[0];
+              Application.data.forEach(function (VideoDetails) {
+                if (!VideoDetails.VideoUrl) return; // skip error entries
+                Downloads.push({
+                  trid: VideoDetails.id,
+                  fileurl: Application.getVideoUrl(VideoDetails),
+                  foldername:
+                    FolderName +
+                    Application.replaceFileName(
+                      CourseDetail.visible_instructors[0].display_name
+                    ) +
+                    "/" +
+                    Application.replaceFileName(CourseDetail.title) +
+                    "/",
+                  filename:
+                    Application.replaceFileName(VideoDetails.VideoTitle) + ".mp4",
+                  caption: Application.getSubtitleUrl(VideoDetails),
+                  captionFilename:
+                    Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt",
+                });
+              });
+
+              Application.downloadSequentially(Downloads, () => {
+                var rows = $("#linkTable")
+                  .dataTable()
+                  .$("tr", { filter: "applied" });
+                rows
+                  .find("td")
+                  .find('[class*="btn-download"]')
+                  .prop("disabled", false);
+                var btnFinishes = rows
+                  .find("td")
+                  .find('[class*="btn-download"]:contains(Downloaded)');
+                btnFinishes.text("Re-Download");
+                btnFinishes.removeClass("btn-danger");
+                btnFinishes.addClass("btn-success");
+              });
+            },
+          },
+          {
             text: "Download Selected Videos",
-            className: "btn-sm btn-success btn-width-35 btn-right",
+            className: "btn-sm btn-success btn-width-25 btn-right",
             attr: {
               id: "SelectedVideos",
               disabled: "disabled",
@@ -829,7 +927,7 @@ var Application = {
 
                     var temp = {
                       trid: data,
-                      fileurl: VideoDetails.VideoUrl,
+                      fileurl: Application.getVideoUrl(VideoDetails),
                       foldername:
                         FolderName +
                         Application.replaceFileName(
@@ -841,6 +939,9 @@ var Application = {
                       filename:
                         Application.replaceFileName(VideoDetails.VideoTitle) +
                         ".mp4",
+                      caption: Application.getSubtitleUrl(VideoDetails),
+                      captionFilename:
+                        Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt",
                     };
 
                     Downloads.push(temp);
@@ -896,6 +997,7 @@ var Application = {
         ];
         $(".sonar-wrapper").hide();
         $(".btn-container").hide();
+        $("#download-settings").css("display", "flex");
         Application.CreateTable(Application);
         break;
       default:
@@ -922,6 +1024,35 @@ var Application = {
       filename = Application.replaceAll(filename, value, "");
     });
     return filename;
+  },
+  getVideoUrl: function (videoData) {
+    var qualities = videoData.VideoQualities;
+    if (!qualities || qualities.length === 0) return videoData.VideoUrl || null;
+    if (selectedQuality === "Auto") return qualities[0].file;
+    var match = null;
+    for (var i = 0; i < qualities.length; i++) {
+      if (qualities[i].label === selectedQuality) {
+        match = qualities[i];
+        break;
+      }
+    }
+    return match ? match.file : qualities[0].file;
+  },
+  getSubtitleUrl: function (videoData) {
+    if (!downloadSubtitles) return null;
+    var captions = videoData.VideoCaptions;
+    if (!captions || captions.length === 0) return null;
+    // Prefer English captions, fall back to first available
+    var enCaption = null;
+    for (var i = 0; i < captions.length; i++) {
+      var locale = captions[i].locale_id || "";
+      if (locale === "en" || locale.indexOf("en-") === 0 || locale.indexOf("en_") === 0) {
+        enCaption = captions[i];
+        break;
+      }
+    }
+    var caption = enCaption || captions[0];
+    return caption.url || null;
   },
 };
 
