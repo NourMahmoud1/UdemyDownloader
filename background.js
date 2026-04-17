@@ -60,19 +60,14 @@ $(document).ready(function(){
                 }
             }
 
-            var folderDynamic = FolderName +
-                Application.replaceFileName(CourseDetail.visible_instructors[0].display_name) + "/" +
-                Application.replaceFileName(CourseDetail.title) + "/";
-            
-            if (VideoDetails.Chapter) {
-                folderDynamic += Application.replaceFileName(VideoDetails.Chapter) + "/";
-            }
+            var namingTemplate = localStorage.getItem('default_naming_template') || "{instructor}/{course}/{chapter}/{video_index}. {video_title}";
+            var ext = VideoDetails.Type === 'Article' ? ".html" : ".mp4";
 
             Downloads.push({
                 trid: VideoDetails.id,
                 fileurl: selectedUrl,
-                foldername: folderDynamic,
-                filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + (VideoDetails.Type === 'Article' ? ".html" : ".mp4"),
+                foldername: FolderName,
+                filename: Application.buildPath(namingTemplate, VideoDetails, CourseDetail, ext),
             });
 
             if (targetSubtitle && targetSubtitle.trim() !== "" && VideoDetails.Captions && VideoDetails.Captions.length > 0) {
@@ -83,8 +78,8 @@ $(document).ready(function(){
                     Downloads.push({
                         trid: VideoDetails.id + "_sub",
                         fileurl: exactSub.url,
-                        foldername: folderDynamic,
-                        filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + ".vtt"
+                        foldername: FolderName,
+                        filename: Application.buildPath(namingTemplate, VideoDetails, CourseDetail, ".vtt")
                     });
                 }
             }
@@ -92,11 +87,17 @@ $(document).ready(function(){
             if (downloadAssets && VideoDetails.Assets && VideoDetails.Assets.length > 0) {
                 VideoDetails.Assets.forEach(function(asset) {
                     if (asset.download_urls && asset.download_urls.File) {
+                        // Attempt to extract real file extension of the asset from its filename
+                        var assetExtRegex = /(\.[^.]+)$/;
+                        var match = asset.filename.match(assetExtRegex);
+                        var aExt = match ? match[1] : "";
+                        var titleWithoutExt = match ? asset.filename.replace(assetExtRegex, '') : asset.filename;
+
                         Downloads.push({
                             trid: VideoDetails.id + "_asset_" + asset.id,
                             fileurl: asset.download_urls.File[0].file,
-                            foldername: folderDynamic,
-                            filename: Application.replaceFileName(asset.filename)
+                            foldername: FolderName,
+                            filename: Application.buildPath(namingTemplate, VideoDetails, CourseDetail, aExt, "{video_title} - " + titleWithoutExt)
                         });
                     }
                 });
@@ -303,6 +304,8 @@ var Application = {
               "id": v.id,
               "VideoUrl": "",
               "VideoTitle": v.object_index + ". " + v.title + " <div class='btn-danger'>ERROR</div>",
+              "TitleRaw": v.title,
+              "IndexRaw": v.object_index,
               "VideoThumbnail": (VideoDetails.asset.thumbnail_sprite ? VideoDetails.asset.thumbnail_sprite.img_url : ""),
               "VideoQuality": "Auto",
               "Chapter": v.chapter,
@@ -323,6 +326,8 @@ var Application = {
               "id": v.id,
               "VideoUrl": dataUriText,
               "VideoTitle": v.object_index + ". " + v.title + " <span class='badge badge-secondary'>Article</span>",
+              "TitleRaw": v.title,
+              "IndexRaw": v.object_index,
               "VideoThumbnail": "",
               "VideoQuality": "HTML",
               "Streams": [],
@@ -336,6 +341,8 @@ var Application = {
               "id": v.id,
               "VideoUrl": VideoDetails.asset.stream_urls.Video[0].file,
               "VideoTitle": v.object_index + ". " + v.title,
+              "TitleRaw": v.title,
+              "IndexRaw": v.object_index,
               "VideoThumbnail": (VideoDetails.asset.thumbnail_sprite ? VideoDetails.asset.thumbnail_sprite.img_url : ""),
               "VideoQuality": VideoDetails.asset.stream_urls.Video[0].label,
               "Streams": VideoDetails.asset.stream_urls.Video.map(stream => ({ label: stream.label, file: stream.file })),
@@ -522,22 +529,15 @@ var Application = {
         var temp = {};
         var selectedUrl = $(this).closest("tr").find('.quality-select').length > 0 ? $(this).closest("tr").find('.quality-select').val() : VideoDetails.VideoUrl;
         var selectedSubtitle = $(this).closest("tr").find('.subtitle-select').length > 0 ? $(this).closest("tr").find('.subtitle-select').val() : "";
-        var folderDynamic = FolderName +
-            Application.replaceFileName(
-              CourseDetail.visible_instructors[0].display_name
-            ) +
-            "/" +
-            Application.replaceFileName(CourseDetail.title) +
-            "/";
-        if (VideoDetails.Chapter) {
-            folderDynamic += Application.replaceFileName(VideoDetails.Chapter) + "/";
-        }
+        
+        var namingTemplate = localStorage.getItem('default_naming_template') || "{instructor}/{course}/{chapter}/{video_index}. {video_title}";
+        var ext = VideoDetails.Type === 'Article' ? ".html" : ".mp4";
+        
         temp = {
           trid: data,
           fileurl: selectedUrl,
-          foldername: folderDynamic,
-          filename:
-            Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + (VideoDetails.Type === 'Article' ? ".html" : ".mp4"),
+          foldername: FolderName, // base folder
+          filename: Application.buildPath(namingTemplate, VideoDetails, CourseDetail, ext),
         };
 
         Downloads.push(temp);
@@ -546,8 +546,8 @@ var Application = {
             Downloads.push({
                 trid: data + "_sub",
                 fileurl: selectedSubtitle,
-                foldername: folderDynamic,
-                filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + ".vtt"
+                foldername: FolderName,
+                filename: Application.buildPath(namingTemplate, VideoDetails, CourseDetail, ".vtt")
             });
         }
 
@@ -1066,25 +1066,14 @@ var Application = {
                     var selectedUrl = rowEl.find('.quality-select').length > 0 ? rowEl.find('.quality-select').val() : VideoDetails.VideoUrl;
                     var selectedSubtitle = rowEl.find('.subtitle-select').length > 0 ? rowEl.find('.subtitle-select').val() : "";
 
-                    var folderDynamic = FolderName +
-                        Application.replaceFileName(
-                          CourseDetail.visible_instructors[0].display_name
-                        ) +
-                        "/" +
-                        Application.replaceFileName(CourseDetail.title) +
-                        "/";
-                    
-                    if (VideoDetails.Chapter) {
-                        folderDynamic += Application.replaceFileName(VideoDetails.Chapter) + "/";
-                    }
+                    var namingTemplate = localStorage.getItem('default_naming_template') || "{instructor}/{course}/{chapter}/{video_index}. {video_title}";
+                    var ext = VideoDetails.Type === 'Article' ? ".html" : ".mp4";
 
                     var temp = {
                       trid: data,
                       fileurl: selectedUrl,
-                      foldername: folderDynamic,
-                      filename:
-                        Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) +
-                        (VideoDetails.Type === 'Article' ? ".html" : ".mp4"),
+                      foldername: FolderName,
+                      filename: Application.buildPath(namingTemplate, VideoDetails, CourseDetail, ext),
                     };
 
                     Downloads.push(temp);
@@ -1093,8 +1082,8 @@ var Application = {
                         Downloads.push({
                             trid: data + "_sub",
                             fileurl: selectedSubtitle,
-                            foldername: folderDynamic,
-                            filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + ".vtt"
+                            foldername: FolderName,
+                            filename: Application.buildPath(namingTemplate, VideoDetails, CourseDetail, ".vtt")
                         });
                     }
                   }
@@ -1169,12 +1158,50 @@ var Application = {
     );
   },
   replaceFileName: function (str) {
+    if (!str) return "Unknown";
     var filename = str;
     var invalid = ["\\", "/", ":", "*", "?", '"', "<", ">", "|", "."];
     $.each(invalid, function (key, value) {
       filename = Application.replaceAll(filename, value, "");
     });
     return filename;
+  },
+  buildPath: function (template, videoDetails, courseDetail, extension = ".mp4", titleOverride = null) {
+      // Ensure template exists
+      var path = template || "{instructor}/{course}/{chapter}/{video_index}. {video_title}";
+      
+      // Values extraction
+      var instructor = courseDetail.visible_instructors && courseDetail.visible_instructors.length > 0 
+          ? courseDetail.visible_instructors[0].display_name : "Unknown Instructor";
+      var course = courseDetail.title || "Unknown Course";
+      var chapter = videoDetails.Chapter || "";
+      var idx = videoDetails.IndexRaw || videoDetails.id;
+      // If a title override is provided (like asset filename), use it for {video_title} instead of the video's title
+      var title = titleOverride || (videoDetails.TitleRaw 
+          ? videoDetails.TitleRaw 
+          : videoDetails.VideoTitle.replace(/ <[^>]*>?/gm, ''));
+
+      // If no chapter exists, replace "{chapter}/" with nothing so it doesn't create empty folders
+      if (!chapter) {
+          path = path.replace(/\{chapter\}\/?/g, "");
+      }
+
+      // Safe templating
+      var result = path
+          .replace(/\{instructor\}/g, Application.replaceFileName(instructor))
+          .replace(/\{course\}/g, Application.replaceFileName(course))
+          .replace(/\{chapter\}/g, Application.replaceFileName(chapter))
+          .replace(/\{video_index\}/g, Application.replaceFileName(idx.toString()))
+          .replace(/\{video_title\}/g, Application.replaceFileName(title));
+
+      // Append extension
+      if (!result.endsWith(extension)) {
+          result += extension;
+      }
+      
+      // Cleanup extra slashes or spaces
+      result = result.replace(/\/+/g, '/').replace(/^\/+/, '');
+      return result;
   },
 };
 

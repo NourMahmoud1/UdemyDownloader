@@ -25,6 +25,12 @@
             </div>
 
             <div class="form-group mb-4">
+               <label for="namingTemplate"><strong>File Naming Template</strong></label>
+               <input type="text" class="form-control" id="namingTemplate" placeholder="{instructor}/{course}/{chapter}/{video_index}. {video_title}">
+               <small class="form-text text-muted">Available placeholders: <code>{instructor}</code>, <code>{course}</code>, <code>{chapter}</code>, <code>{video_index}</code>, <code>{video_title}</code>. Subfolders are created with <code>/</code>.</small>
+            </div>
+
+            <div class="form-group mb-4">
                <label for="defaultQuality"><strong>Default Bulk Video Quality</strong></label>
                <select class="form-control" id="defaultQuality">
                   <option value="1080">1080p</option>

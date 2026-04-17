@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const defaultFolderInput = document.getElementById('defaultFolder');
+    const namingTemplateInput = document.getElementById('namingTemplate');
     const defaultQualitySelect = document.getElementById('defaultQuality');
     const defaultSubtitleInput = document.getElementById('defaultSubtitle');
     const defaultAssetsCheck = document.getElementById('defaultAssets');
@@ -8,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load saved settings from LocalStorage
     defaultFolderInput.value = localStorage.getItem('default_folder') || "Udemy Download/";
+    namingTemplateInput.value = localStorage.getItem('default_naming_template') || "{instructor}/{course}/{chapter}/{video_index}. {video_title}";
     defaultQualitySelect.value = localStorage.getItem('default_quality') || "1080";
     defaultSubtitleInput.value = localStorage.getItem('default_subtitle') || "en_US";
     
@@ -30,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Save new settings
         localStorage.setItem('default_folder', folderPath || "Udemy Download/");
+        localStorage.setItem('default_naming_template', namingTemplateInput.value.trim() || "{instructor}/{course}/{chapter}/{video_index}. {video_title}");
         localStorage.setItem('default_quality', defaultQualitySelect.value);
         localStorage.setItem('default_subtitle', defaultSubtitleInput.value.trim());
         localStorage.setItem('default_assets', defaultAssetsCheck.checked ? 'true' : 'false');
