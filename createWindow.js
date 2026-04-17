@@ -27,8 +27,6 @@ chrome.action.onClicked.addListener(function () {
                 'type': 'popup',
                 'width': width,
                 'height': height,
-                'left': Math.round((screen.width/2) - (width/2)),
-                'top': Math.round((screen.height/2) - (height/2)),
                 'focused': true
             });
         } else {
