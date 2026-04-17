@@ -26,13 +26,20 @@ var Application = {
   init :  function() {
     Application.Cookies = [];
 	Application.Cookies = {access_token : ""};
+	Application.Domain = "https://www.udemy.com";
     chrome.cookies.getAll({
-        url: "https://banquemisr25.udemy.com"
+        domain: "udemy.com"
       }, function (cookies) {
-
+		let domainMap = {};
         for (var i = 0; i < cookies.length; i++) {
           Application.Cookies[cookies[i].name] = cookies[i].value;
+		  domainMap[cookies[i].name] = cookies[i].domain;
         }
+
+		if (Application.Cookies["access_token"] && domainMap["access_token"]) {
+			Application.Domain = "https://" + domainMap["access_token"].replace(/^\./, "");
+		}
+
         if(Application.Cookies["access_token"] && Application.Cookies["access_token"].length > 2 ) { //login ise
             $('.sonar-wrapper').hide();
             $('.btn-container').show();
@@ -49,13 +56,13 @@ var Application = {
         }else{ // değilse
             $('body').empty();
             $('body').html("<i>Please log in on Udemy and restart the extension.</i>");
-            chrome.tabs.create({url : "https://banquemisr25.udemy.com/join/login-popup/"}, () => {}) 
+            chrome.tabs.create({url : Application.Domain + "/join/login-popup/"}, () => {}) 
         }    
     });
 
   },
   Course : function() {
-      load.url = "https://banquemisr25.udemy.com/api-2.0/users/me/subscribed-courses/";
+      load.url = Application.Domain + "/api-2.0/users/me/subscribed-courses/";
       load.type = "GET";
       load.data = {
           "page_size": 100,
@@ -102,7 +109,7 @@ var Application = {
   PlayList : async function () {
 
       video.base = new Array();
-      load.url = "https://banquemisr25.udemy.com/api-2.0/courses/"+Application.CourseId+"/subscriber-curriculum-items";
+      load.url = Application.Domain + "/api-2.0/courses/"+Application.CourseId+"/subscriber-curriculum-items";
       load.type = "GET";
       load.data = {
           "page_size": "1400",
@@ -152,8 +159,15 @@ var Application = {
 
       video.type = "PlayList";
       
-      VideoIdList = $.grep(getVideoList.results, function(element, index) {
-          return (typeof element.asset  !== 'undefined') ? (element.asset.asset_type === 'Video') : "";
+      var currentChapter = "";
+      var VideoIdList = [];
+      $.each(getVideoList.results, function(index, element) {
+          if (element._class === "chapter") {
+              currentChapter = element.object_index + ". " + element.title;
+          } else if (element._class === "lecture" && typeof element.asset !== 'undefined' && element.asset.asset_type === 'Video') {
+              element.chapter = currentChapter;
+              VideoIdList.push(element);
+          }
       });
 
       var i = 1;
@@ -164,7 +178,7 @@ var Application = {
           await waitFor(0);
       
           var temp = {};
-          temp.url = "https://banquemisr25.udemy.com/api-2.0/users/me/subscribed-courses/" + Application.CourseId + "/lectures/" + v.id;
+          temp.url = Application.Domain + "/api-2.0/users/me/subscribed-courses/" + Application.CourseId + "/lectures/" + v.id;
           temp.type = "GET";
           temp.data = {
             "fields[lecture]": "asset,description,download_url,is_free,last_watched_second",
@@ -184,7 +198,8 @@ var Application = {
               "VideoUrl": "",
               "VideoTitle": v.object_index + ". " + v.title + " <div class='btn-danger'>ERROR</div>",
               "VideoThumbnail": (VideoDetails.asset.thumbnail_sprite ? VideoDetails.asset.thumbnail_sprite.img_url : ""),
-              "VideoQuality": "Auto"
+              "VideoQuality": "Auto",
+              "Chapter": v.chapter
             }
 
             Errors +=1;
@@ -195,7 +210,10 @@ var Application = {
               "VideoUrl": VideoDetails.asset.stream_urls.Video[0].file,
               "VideoTitle": v.object_index + ". " + v.title,
               "VideoThumbnail": (VideoDetails.asset.thumbnail_sprite ? VideoDetails.asset.thumbnail_sprite.img_url : ""),
-              "VideoQuality": VideoDetails.asset.stream_urls.Video[0].label
+              "VideoQuality": VideoDetails.asset.stream_urls.Video[0].label,
+              "Streams": VideoDetails.asset.stream_urls.Video.map(stream => ({ label: stream.label, file: stream.file })),
+              "Captions": VideoDetails.asset.captions || [],
+              "Chapter": v.chapter
             }
           }
           video.base.push(tobepush);
@@ -373,22 +391,36 @@ var Application = {
           }
         )[0];
         var temp = {};
-        temp = {
-          trid: data,
-          fileurl: VideoDetails.VideoUrl,
-          foldername:
-            FolderName +
+        var selectedUrl = $(this).closest("tr").find('.quality-select').length > 0 ? $(this).closest("tr").find('.quality-select').val() : VideoDetails.VideoUrl;
+        var selectedSubtitle = $(this).closest("tr").find('.subtitle-select').length > 0 ? $(this).closest("tr").find('.subtitle-select').val() : "";
+        var folderDynamic = FolderName +
             Application.replaceFileName(
               CourseDetail.visible_instructors[0].display_name
             ) +
             "/" +
             Application.replaceFileName(CourseDetail.title) +
-            "/",
+            "/";
+        if (VideoDetails.Chapter) {
+            folderDynamic += Application.replaceFileName(VideoDetails.Chapter) + "/";
+        }
+        temp = {
+          trid: data,
+          fileurl: selectedUrl,
+          foldername: folderDynamic,
           filename:
             Application.replaceFileName(VideoDetails.VideoTitle) + ".mp4",
         };
 
         Downloads.push(temp);
+
+        if (selectedSubtitle) {
+            Downloads.push({
+                trid: data + "_sub",
+                fileurl: selectedSubtitle,
+                foldername: folderDynamic,
+                filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt"
+            });
+        }
 
         Application.downloadSequentially(Downloads, () => {
           var rows = $("#linkTable").dataTable().$("tr", { filter: "applied" });
@@ -738,6 +770,28 @@ var Application = {
           {
             data: "VideoTitle",
             className: "td-3",
+            render: function(data, type, row) {
+              var result = data;
+              if (row.Streams && row.Streams.length > 0) {
+                 var select = '<div style="margin-top: 5px;"><select class="form-control form-control-sm quality-select" style="width: auto; display: inline-block;">';
+                 row.Streams.forEach(function(stream) {
+                     var selected = (stream.label === row.VideoQuality) ? 'selected' : '';
+                     select += '<option value="' + stream.file + '" ' + selected + '>' + stream.label + '</option>';
+                 });
+                 select += '</select></div>';
+                 result += select;
+              }
+              if (row.Captions && row.Captions.length > 0) {
+                 var subSelect = '<div style="margin-top: 5px;"><select class="form-control form-control-sm subtitle-select" style="width: auto; display: inline-block;">';
+                 subSelect += '<option value="">No Subtitle</option>';
+                 row.Captions.forEach(function(cap) {
+                     subSelect += '<option value="' + cap.url + '">' + cap.title + ' (' + cap.locale_id + ')</option>';
+                 });
+                 subSelect += '</select></div>';
+                 result += subSelect;
+              }
+              return result;
+            }
           },
           {
             data: null,
@@ -817,6 +871,7 @@ var Application = {
                 .each(function (i) {
                   if (this.checked == true) {
                     var data = $(this).parents("td").parents("tr").attr("id");
+                    var rowEl = $(this).parents("tr");
                     var VideoDetails = $.grep(Application.data, function (v) {
                       return v.id == data;
                     })[0];
@@ -827,23 +882,40 @@ var Application = {
                       }
                     )[0];
 
-                    var temp = {
-                      trid: data,
-                      fileurl: VideoDetails.VideoUrl,
-                      foldername:
-                        FolderName +
+                    var selectedUrl = rowEl.find('.quality-select').length > 0 ? rowEl.find('.quality-select').val() : VideoDetails.VideoUrl;
+                    var selectedSubtitle = rowEl.find('.subtitle-select').length > 0 ? rowEl.find('.subtitle-select').val() : "";
+
+                    var folderDynamic = FolderName +
                         Application.replaceFileName(
                           CourseDetail.visible_instructors[0].display_name
                         ) +
                         "/" +
                         Application.replaceFileName(CourseDetail.title) +
-                        "/",
+                        "/";
+                    
+                    if (VideoDetails.Chapter) {
+                        folderDynamic += Application.replaceFileName(VideoDetails.Chapter) + "/";
+                    }
+
+                    var temp = {
+                      trid: data,
+                      fileurl: selectedUrl,
+                      foldername: folderDynamic,
                       filename:
                         Application.replaceFileName(VideoDetails.VideoTitle) +
                         ".mp4",
                     };
 
                     Downloads.push(temp);
+
+                    if (selectedSubtitle) {
+                        Downloads.push({
+                            trid: data + "_sub",
+                            fileurl: selectedSubtitle,
+                            foldername: folderDynamic,
+                            filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt"
+                        });
+                    }
                   }
                 });
 
