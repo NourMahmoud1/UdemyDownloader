@@ -27,6 +27,40 @@ const UI = {
   showLoading()  { $('.sonar-wrapper').show(); },
   hideLoading()  { $('.sonar-wrapper').hide(); },
 
+  /**
+   * Displays a temporary toast notification.
+   * @param {string} msg 
+   * @param {string} icon - Lucide icon name
+   */
+  showToast(msg, icon = 'info') {
+    const id = 'toast-' + Date.now();
+    const html = `
+      <div id="${id}" class="toast-msg">
+        <i data-lucide="${icon}" style="width:18px;height:18px;color:var(--brand-primary-light);"></i>
+        <span>${msg}</span>
+      </div>
+    `;
+    $('#toast-container').append(html);
+    if (window.lucide) { lucide.createIcons(); }
+
+    setTimeout(() => {
+      $(`#${id}`).fadeOut(300, function() { $(this).remove(); });
+    }, 4000);
+  },
+
+  /**
+   * Shows skeleton loader rows in the main container.
+   * @param {number} count 
+   */
+  showSkeleton(count = 5) {
+    $('#example').empty();
+    let skeletons = '';
+    for(let i=0; i<count; i++) {
+      skeletons += '<div class="skeleton-row skeleton"></div>';
+    }
+    $('#example').append(skeletons);
+  },
+
   // ── Thumbnail renderers ───────────────────────────────────────────────────
 
   /**
@@ -202,20 +236,36 @@ const UI = {
     App.CourseData  = { Data: apiData };
     App.data        = apiData.results;
 
+    if (!apiData.results || apiData.results.length === 0) {
+      UI._renderEmptyState('No courses found. Try fetching again.');
+      return;
+    }
+
     const config = {
       data:          apiData.results,
       lengthChange:  false,
       DisplayLength: 5,
       Paging:        true,
       columns: [
-        { data: 'image_125_H', className: 'td-1', render: (d) => UI.getImage(d) },
-        { data: 'title',       className: 'td-3' },
-        { data: null,          className: 'td-4' },
+        { 
+          data: 'image_125_H', 
+          className: 'td-1', 
+          render: (d) => `<img src="${d}" class="course-thumbnail" style="width:100px; height:auto;">` 
+        },
+        { 
+          data: 'title', 
+          className: 'td-3',
+          render: (d) => `
+            <span class="course-card-title">${d}</span>
+            <span class="course-card-subtitle">Enrolled Course • Click "Get Video List" to expand</span>
+          `
+        },
+        { data: null, className: 'td-4' },
       ],
       buttons: [
         {
-          text:      'Re-Analyze course list',
-          className: 'btn-sm btn-danger btn-width-100',
+          text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> <span>Re-Analyze Courses</span></div>',
+          className: 'btn-sm btn-danger btn-width-100', // Still full width but styled better in CSS
           action() {
             $('#example').empty();
             UI.showLoading();
@@ -232,7 +282,11 @@ const UI = {
           targets:        -1,
           data:           null,
           className:      'minumum',
-          defaultContent: '<button class="btn btn-secondary btn-sm btn-success" type="button" style="width:100%;"><span>Get Video List</span></button>',
+          defaultContent: `
+            <button class="btn btn-pill btn-success" type="button" style="width:100%;">
+              <i data-lucide="list-video" style="width:16px;height:16px;"></i>
+              <span>Get Video List</span>
+            </button>`,
         },
       ],
     };
@@ -251,6 +305,11 @@ const UI = {
 
     App.type = 'Download';
     App.data = videoList;
+
+    if (!videoList || videoList.length === 0) {
+      UI._renderEmptyState('This course seems empty or couldn\'t be loaded.');
+      return;
+    }
 
     const userQuality  = Storage.getSetting('default_quality');
     const userSubtitle = Storage.getSetting('default_subtitle');
@@ -320,7 +379,11 @@ const UI = {
           targets:        -1,
           data:           null,
           className:      'minumum',
-          defaultContent: '<button class="btn btn-secondary btn-sm btn-success pd-0 btn-download" type="button" style="width:100%;"><span>Download</span></button>',
+          defaultContent: `
+            <button class="btn btn-pill btn-success btn-download" type="button" style="width:100%;">
+              <i data-lucide="download" style="width:16px;height:16px;"></i>
+              <span>Download</span>
+            </button>`,
         },
       ],
     };
@@ -332,7 +395,7 @@ const UI = {
   _playlistButtons() {
     return [
       {
-        text:      '&laquo;',
+        text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="chevrons-left" style="width:14px;height:14px;"></i> <span>Back</span></div>',
         className: 'btn-sm btn-danger btn-width-5 btn-right',
         action() {
           UI.showLoading();
@@ -341,7 +404,7 @@ const UI = {
         },
       },
       {
-        text:      'Select All',
+        text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="check-square" style="width:14px;height:14px;"></i> <span id="selectAllText">Select All</span></div>',
         className: 'btn-sm btn-danger btn-width-25 btn-right',
         attr:      { id: 'SelectAll' },
         action() {
@@ -352,10 +415,10 @@ const UI = {
           if (allChecked) {
             checkboxes.prop('checked', false);
             $('#SelectedVideos').prop('disabled', true).text('Download Selected Videos');
-            $('#SelectAll span').text('Select All');
+            $('#selectAllText').text('Select All');
           } else {
             checkboxes.prop('checked', true);
-            $('#SelectAll span').text('DeSelect All');
+            $('#selectAllText').text('DeSelect All');
             const count = checkboxes.filter('input:checked').length;
             $('#SelectedVideos').prop('disabled', false)
               .text('Download ' + count + ' ' + (count === 1 ? 'Video' : 'Videos'));
@@ -363,7 +426,7 @@ const UI = {
         },
       },
       {
-        text:      'Re-Analyze Videos',
+        text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> <span>Re-Analyze</span></div>',
         className: 'btn-sm btn-danger btn-width-35 btn-right',
         action() {
           $('#example').empty();
@@ -375,7 +438,7 @@ const UI = {
         },
       },
       {
-        text:      'Bulk Course Download',
+        text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="download-cloud" style="width:14px;height:14px;"></i> <span>Bulk Download</span></div>',
         className: 'btn-sm btn-info btn-width-35 btn-right',
         attr:      { id: 'BulkDownload' },
         action() {
@@ -393,7 +456,7 @@ const UI = {
         },
       },
       {
-        text:      'Download Selected Videos',
+        text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="arrow-down-circle" style="width:14px;height:14px;"></i> <span>Download Selected</span></div>',
         className: 'btn-sm btn-success btn-width-35 btn-right',
         attr:      { id: 'SelectedVideos', disabled: 'disabled' },
         action() {
@@ -442,5 +505,17 @@ const UI = {
         },
       },
     ];
+  },
+
+  /** @private */
+  _renderEmptyState(msg) {
+    $('#example').empty().append(`
+      <div class="text-center p-5" style="background: var(--bg-surface); border-radius: var(--radius-lg); border: 2px dashed var(--glass-border); margin: 20px;">
+        <i data-lucide="layout-grid" style="width: 48px; height: 48px; color: var(--text-muted); margin-bottom: 20px;"></i>
+        <h5 style="color: var(--text-main); font-weight: 600;">${msg}</h5>
+        <p style="color: var(--text-muted);">If you think this is an error, please try re-analyzing.</p>
+      </div>
+    `);
+    if (window.lucide) { lucide.createIcons(); }
   },
 };

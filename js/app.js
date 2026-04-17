@@ -35,6 +35,11 @@ const App = {
     $('.version').text('v' + manifest.version);
     $('title').text(manifest.name + ' v' + manifest.version);
 
+    // Initialise modern icons
+    if (window.lucide) {
+      lucide.createIcons();
+    }
+
     UdemyAPI.initFromCookies((isLoggedIn) => {
       if (isLoggedIn) {
         App._setupLoggedIn();
@@ -50,6 +55,9 @@ const App = {
   _setupLoggedIn() {
     $('.sonar-wrapper').hide();
     $('.btn-container').show();
+
+    $('#analyze').html('<i data-lucide="search" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;"></i> My Courses');
+    if (window.lucide) { lucide.createIcons(); }
 
     $('#analyze').on('click', () => {
       $('.btn-container').hide();
@@ -113,10 +121,13 @@ const App = {
    */
   loadCourses() {
     try {
+      UI.showSkeleton(5);
       const data = UdemyAPI.fetchCourses();
       UI.renderCourseList(data);
+      UI.showToast('Courses loaded successfully', 'check-circle');
     } catch (err) {
       console.error('[App] Failed to load courses:', err);
+      UI.showToast('Failed to load courses', 'alert-circle');
     }
   },
 
@@ -128,8 +139,7 @@ const App = {
     App.CourseId = courseId;
     App.errors   = 0;
 
-    UI.showLoading();
-    $('#example').empty();
+    UI.showSkeleton(8);
     $('#counter').show();
     UI.updateCounter({ Current: 0, Total: 0 });
 
@@ -139,8 +149,10 @@ const App = {
       });
 
       UI.renderPlaylist(videoList);
+      UI.showToast('Playlist loaded', 'list');
     } catch (err) {
       console.error('[App] Failed to load playlist:', err);
+      UI.showToast('Failed to load playlist', 'x-circle');
     }
   },
 };
