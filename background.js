@@ -72,7 +72,7 @@ $(document).ready(function(){
                 trid: VideoDetails.id,
                 fileurl: selectedUrl,
                 foldername: folderDynamic,
-                filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".mp4",
+                filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + (VideoDetails.Type === 'Article' ? ".html" : ".mp4"),
             });
 
             if (targetSubtitle && targetSubtitle.trim() !== "" && VideoDetails.Captions && VideoDetails.Captions.length > 0) {
@@ -84,7 +84,7 @@ $(document).ready(function(){
                         trid: VideoDetails.id + "_sub",
                         fileurl: exactSub.url,
                         foldername: folderDynamic,
-                        filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt"
+                        filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + ".vtt"
                     });
                 }
             }
@@ -269,7 +269,7 @@ var Application = {
       $.each(getVideoList.results, function(index, element) {
           if (element._class === "chapter") {
               currentChapter = element.object_index + ". " + element.title;
-          } else if (element._class === "lecture" && typeof element.asset !== 'undefined' && element.asset.asset_type === 'Video') {
+          } else if (element._class === "lecture" && typeof element.asset !== 'undefined' && (element.asset.asset_type === 'Video' || element.asset.asset_type === 'Article')) {
               element.chapter = currentChapter;
               VideoIdList.push(element);
           }
@@ -287,14 +287,15 @@ var Application = {
           temp.type = "GET";
           temp.data = {
             "fields[lecture]": "asset,description,download_url,is_free,last_watched_second",
-            "fields[asset]": "asset_type,length,stream_urls,captions,thumbnail_sprite,slides,slide_urls,download_urls,image_125_H"
+            "fields[asset]": "asset_type,length,stream_urls,captions,thumbnail_sprite,slides,slide_urls,download_urls,image_125_H,body"
           };
       
           var VideoDetails = Application.uGetApi(temp, { "Current": i });
       
-          
-          // Validate video data
-          if (!VideoDetails || !VideoDetails.asset || !VideoDetails.asset.stream_urls || !VideoDetails.asset.stream_urls.Video || !VideoDetails.asset.stream_urls.Video[0]) {
+          var isArticle = VideoDetails && VideoDetails.asset && VideoDetails.asset.asset_type === 'Article';
+
+          // Validate video/article data
+          if (!isArticle && (!VideoDetails || !VideoDetails.asset || !VideoDetails.asset.stream_urls || !VideoDetails.asset.stream_urls.Video || !VideoDetails.asset.stream_urls.Video[0])) {
             console.warn(`Skipping video at index ${k} (ID: ${v.id}) - Invalid or missing video data.`);
             console.log(VideoDetails)
             
@@ -304,11 +305,32 @@ var Application = {
               "VideoTitle": v.object_index + ". " + v.title + " <div class='btn-danger'>ERROR</div>",
               "VideoThumbnail": (VideoDetails.asset.thumbnail_sprite ? VideoDetails.asset.thumbnail_sprite.img_url : ""),
               "VideoQuality": "Auto",
-              "Chapter": v.chapter
+              "Chapter": v.chapter,
+              "Type": "Video"
             }
 
             Errors +=1;
             //return; // Skip this iteration
+          }else if (isArticle) {
+            var articleHtml = VideoDetails.asset.body || v.description || "<h1>No Content</h1>";
+            // Wrap the article body in a basic HTML structure and sanitize to allow viewing properly
+            var fullHtml = "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>" + v.title + "</title>\n<style>\nbody { font-family: -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,\"Helvetica Neue\",Arial,sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }\nimg { max-width: 100%; height: auto; }\n</style>\n</head>\n<body>\n" + articleHtml + "\n</body>\n</html>";
+            
+            var b64encoded = btoa(unescape(encodeURIComponent(fullHtml)));
+            var dataUriText = "data:text/html;base64," + b64encoded;
+
+            tobepush = {
+              "id": v.id,
+              "VideoUrl": dataUriText,
+              "VideoTitle": v.object_index + ". " + v.title + " <span class='badge badge-secondary'>Article</span>",
+              "VideoThumbnail": "",
+              "VideoQuality": "HTML",
+              "Streams": [],
+              "Captions": [],
+              "Assets": v.supplementary_assets || [],
+              "Chapter": v.chapter,
+              "Type": "Article"
+            }
           }else{
             tobepush = {
               "id": v.id,
@@ -319,7 +341,8 @@ var Application = {
               "Streams": VideoDetails.asset.stream_urls.Video.map(stream => ({ label: stream.label, file: stream.file })),
               "Captions": VideoDetails.asset.captions || [],
               "Assets": v.supplementary_assets || [],
-              "Chapter": v.chapter
+              "Chapter": v.chapter,
+              "Type": "Video"
             }
           }
           video.base.push(tobepush);
@@ -514,7 +537,7 @@ var Application = {
           fileurl: selectedUrl,
           foldername: folderDynamic,
           filename:
-            Application.replaceFileName(VideoDetails.VideoTitle) + ".mp4",
+            Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + (VideoDetails.Type === 'Article' ? ".html" : ".mp4"),
         };
 
         Downloads.push(temp);
@@ -524,7 +547,7 @@ var Application = {
                 trid: data + "_sub",
                 fileurl: selectedSubtitle,
                 foldername: folderDynamic,
-                filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt"
+                filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + ".vtt"
             });
         }
 
@@ -890,7 +913,12 @@ var Application = {
           },
           {
             data: "VideoThumbnail",
-            render: Application.GetSprite,
+            render: function(data, type, row) {
+              if (row.Type === 'Article') {
+                 return '<div style="width:120px; height:67.5px; border:2px solid var(--dark); display:flex; align-items:center; justify-content:center; background:#eee; font-weight:bold; font-size:12px; color:#555;">HTML Article</div>';
+              }
+              return Application.GetSprite(data, type, row);
+            },
             className: "td-2",
           },
           {
@@ -1055,8 +1083,8 @@ var Application = {
                       fileurl: selectedUrl,
                       foldername: folderDynamic,
                       filename:
-                        Application.replaceFileName(VideoDetails.VideoTitle) +
-                        ".mp4",
+                        Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) +
+                        (VideoDetails.Type === 'Article' ? ".html" : ".mp4"),
                     };
 
                     Downloads.push(temp);
@@ -1066,7 +1094,7 @@ var Application = {
                             trid: data + "_sub",
                             fileurl: selectedSubtitle,
                             foldername: folderDynamic,
-                            filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt"
+                            filename: Application.replaceFileName(VideoDetails.VideoTitle.replace(/ <[^>]*>?/gm, '')) + ".vtt"
                         });
                     }
                   }
