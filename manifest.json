@@ -17,6 +17,7 @@
    "name": "Udemy Downloader",
    "permissions": [ "*://*.udemy.com/*", "downloads", "downloads.shelf", "cookies" ],
    "short_name": "Udemy",
+   "options_page": "options.html",
    "update_url": "https://edge.microsoft.com/extensionwebstorebase/v1/crx",
    "version": "1.0.0"
 }

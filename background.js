@@ -1,4 +1,4 @@
-var FolderName = "Udemy Download/";
+var FolderName = localStorage.getItem("default_folder") || "Udemy Download/";
 var Downloads = [];
 var load = {};
 var course = {};
@@ -13,6 +13,111 @@ video.base = new Array();
 $(document).ready(function(){
 	$('.version').text('v' + chrome.runtime.getManifest().version);
 	$('Title').text(chrome.runtime.getManifest().name + ' v' + chrome.runtime.getManifest().version);
+
+    // Bulk download event handlers
+    $('#startBulkDownloadBtn').on('click', function() {
+        $('#bulkDownloadModal').modal('hide');
+        
+        var targetQuality = $('#bulkQualitySelect').val();
+        var targetSubtitle = $('#bulkSubtitleSelect').val();
+        var downloadAssets = $('#bulkAssetsCheck').is(':checked');
+
+        var CourseDetail = $.grep(Application.CourseData.Data.results, function (v) {
+            return v.id == Application.CourseId;
+        })[0];
+
+        Downloads = [];
+        
+        // Loop through all videos in the current course list
+        $.each(Application.data, function(index, VideoDetails) {
+            var selectedUrl = VideoDetails.VideoUrl; // default
+
+            if (VideoDetails.Streams && VideoDetails.Streams.length > 0) {
+                // Determine fallback
+                if (targetQuality === 'highest') {
+                    // Assuming last stream or sorting by numerical resolution
+                    var maxStream = VideoDetails.Streams.reduce(function(prev, current) {
+                        return (parseInt(prev.label) > parseInt(current.label)) ? prev : current;
+                    });
+                    selectedUrl = maxStream.file;
+                } else if (targetQuality === 'lowest') {
+                    var minStream = VideoDetails.Streams.reduce(function(prev, current) {
+                        return (parseInt(prev.label) < parseInt(current.label)) ? prev : current;
+                    });
+                    selectedUrl = minStream.file;
+                } else {
+                    // Specific target quality
+                    var exactStream = VideoDetails.Streams.find(s => parseInt(s.label) == parseInt(targetQuality));
+                    if (exactStream) {
+                        selectedUrl = exactStream.file;
+                    } else {
+                        // Fallback to highest
+                        var maxFallback = VideoDetails.Streams.reduce(function(prev, current) {
+                            return (parseInt(prev.label) > parseInt(current.label)) ? prev : current;
+                        });
+                        selectedUrl = maxFallback.file;
+                    }
+                }
+            }
+
+            var folderDynamic = FolderName +
+                Application.replaceFileName(CourseDetail.visible_instructors[0].display_name) + "/" +
+                Application.replaceFileName(CourseDetail.title) + "/";
+            
+            if (VideoDetails.Chapter) {
+                folderDynamic += Application.replaceFileName(VideoDetails.Chapter) + "/";
+            }
+
+            Downloads.push({
+                trid: VideoDetails.id,
+                fileurl: selectedUrl,
+                foldername: folderDynamic,
+                filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".mp4",
+            });
+
+            if (targetSubtitle && targetSubtitle.trim() !== "" && VideoDetails.Captions && VideoDetails.Captions.length > 0) {
+                var exactSub = VideoDetails.Captions.find(c => c.locale_id.toLowerCase().includes(targetSubtitle.toLowerCase()));
+                if (!exactSub) exactSub = VideoDetails.Captions[0]; // fallback to first subtitle if language missing
+
+                if (exactSub) {
+                    Downloads.push({
+                        trid: VideoDetails.id + "_sub",
+                        fileurl: exactSub.url,
+                        foldername: folderDynamic,
+                        filename: Application.replaceFileName(VideoDetails.VideoTitle) + ".vtt"
+                    });
+                }
+            }
+
+            if (downloadAssets && VideoDetails.Assets && VideoDetails.Assets.length > 0) {
+                VideoDetails.Assets.forEach(function(asset) {
+                    if (asset.download_urls && asset.download_urls.File) {
+                        Downloads.push({
+                            trid: VideoDetails.id + "_asset_" + asset.id,
+                            fileurl: asset.download_urls.File[0].file,
+                            foldername: folderDynamic,
+                            filename: Application.replaceFileName(asset.filename)
+                        });
+                    }
+                });
+            }
+        });
+
+        Application.downloadSequentially(Downloads, () => {
+            // bulk download complete callback
+            console.log("Bulk download payload processed.");
+        });
+    });
+
+    $('#clearCourseLogBtn').on('click', function() {
+        if (Application.CourseId) {
+            localStorage.removeItem('CompletedDownloads_' + Application.CourseId);
+            alert("Download history cleared for this course.");
+        } else {
+            alert("Open a course first.");
+        }
+    });
+
 });
 const waitFor = (ms) => new Promise((r) => setTimeout(r, ms));
 const asyncForEach = async (array, callback) => {
@@ -213,6 +318,7 @@ var Application = {
               "VideoQuality": VideoDetails.asset.stream_urls.Video[0].label,
               "Streams": VideoDetails.asset.stream_urls.Video.map(stream => ({ label: stream.label, file: stream.file })),
               "Captions": VideoDetails.asset.captions || [],
+              "Assets": v.supplementary_assets || [],
               "Chapter": v.chapter
             }
           }
@@ -493,6 +599,17 @@ var Application = {
       );
       currentPage -= 1;
 
+      var fullFilePath = foldername + filename;
+      var completedStoreKey = 'CompletedDownloads_' + Application.CourseId;
+      var completedList = JSON.parse(localStorage.getItem(completedStoreKey) || "[]");
+
+      if (completedList.includes(fullFilePath)) {
+          console.log("Skipping already downloaded: " + fullFilePath);
+          index++;
+          setTimeout(next, 0);
+          return;
+      }
+
       index++;
       if (fileurl) {
           console.log(foldername + filename);
@@ -514,6 +631,15 @@ var Application = {
     function onChanged({ id, state }) {
       if (id === currentId && state && state.current !== "in_progress") {
         // download finish.
+        if (state.current === "complete") {
+            var fullPathComplete = urls[index - 1].foldername + urls[index - 1].filename;
+            var completeStore = 'CompletedDownloads_' + Application.CourseId;
+            var listLog = JSON.parse(localStorage.getItem(completeStore) || "[]");
+            if (!listLog.includes(fullPathComplete)) {
+                listLog.push(fullPathComplete);
+                localStorage.setItem(completeStore, JSON.stringify(listLog));
+            }
+        }
         var rows = $("#linkTable").dataTable().$("tr", { filter: "applied" });
         var downloadButton = rows
           .filter("[id*=" + pollProgress.progressBar + "]")
@@ -772,10 +898,17 @@ var Application = {
             className: "td-3",
             render: function(data, type, row) {
               var result = data;
+              var userQuality = localStorage.getItem('default_quality') || '1080';
+              var userSubtitle = localStorage.getItem('default_subtitle') || 'en_US';
+              
               if (row.Streams && row.Streams.length > 0) {
                  var select = '<div style="margin-top: 5px;"><select class="form-control form-control-sm quality-select" style="width: auto; display: inline-block;">';
                  row.Streams.forEach(function(stream) {
-                     var selected = (stream.label === row.VideoQuality) ? 'selected' : '';
+                     var selected = '';
+                     // Automatically select based on user prefs rather than just "row.VideoQuality" fallback
+                     if (stream.label === userQuality || (userQuality === 'highest' && Math.max(...row.Streams.map(s => parseInt(s.label))) == parseInt(stream.label)) || (userQuality === 'lowest' && Math.min(...row.Streams.map(s => parseInt(s.label))) == parseInt(stream.label))) {
+                         selected = 'selected';
+                     }
                      select += '<option value="' + stream.file + '" ' + selected + '>' + stream.label + '</option>';
                  });
                  select += '</select></div>';
@@ -785,7 +918,8 @@ var Application = {
                  var subSelect = '<div style="margin-top: 5px;"><select class="form-control form-control-sm subtitle-select" style="width: auto; display: inline-block;">';
                  subSelect += '<option value="">No Subtitle</option>';
                  row.Captions.forEach(function(cap) {
-                     subSelect += '<option value="' + cap.url + '">' + cap.title + ' (' + cap.locale_id + ')</option>';
+                     var isSavedPrefMatch = (userSubtitle.trim() !== '' && cap.locale_id.toLowerCase().includes(userSubtitle.toLowerCase())) ? 'selected' : '';
+                     subSelect += '<option value="' + cap.url + '" ' + isSavedPrefMatch + '>' + cap.title + ' (' + cap.locale_id + ')</option>';
                  });
                  subSelect += '</select></div>';
                  result += subSelect;
@@ -850,6 +984,25 @@ var Application = {
               localStorage.removeItem('LoadedVideoList');
               Application.PlayList();
             },
+          },
+          {
+            text: "Bulk Course Download",
+            className: "btn-sm btn-info btn-width-35 btn-right",
+            attr: {
+              id: "BulkDownload",
+            },
+            action: function (e, dt, node, config) {
+              if (window.location.pathname.includes("popup.html")) {
+                var defFolder = localStorage.getItem('default_folder');
+                if (localStorage.getItem('default_quality')) { $('#bulkQualitySelect').val(localStorage.getItem('default_quality')); }
+                if (localStorage.getItem('default_subtitle') !== null) { $('#bulkSubtitleSelect').val(localStorage.getItem('default_subtitle')); }
+                if (localStorage.getItem('default_assets') !== null) { $('#bulkAssetsCheck').prop('checked', localStorage.getItem('default_assets') === 'true'); }
+                
+                FolderName = defFolder || "Udemy Download/"; // Ensure active ref is synchronized
+
+                $("#bulkDownloadModal").modal("show");
+              }
+            }
           },
           {
             text: "Download Selected Videos",

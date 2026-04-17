@@ -99,5 +99,49 @@
       </div>
       </div>
 
+      <!-- Bulk Download Modal -->
+      <div class="modal fade" id="bulkDownloadModal" tabindex="-1" role="dialog" aria-labelledby="bulkDownloadModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="bulkDownloadModalLabel">Bulk Download Preferences</h5>
+              <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <label for="bulkQualitySelect">Target Quality</label>
+                <select class="form-control" id="bulkQualitySelect">
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                  <option value="360">360p</option>
+                  <option value="highest">Highest Available</option>
+                  <option value="lowest">Lowest Available</option>
+                </select>
+                <small class="form-text text-muted">Will fallback to highest available if chosen quality is missing.</small>
+              </div>
+              <div class="form-group">
+                <label for="bulkSubtitleSelect">Target Subtitle Language (Optional)</label>
+                <input type="text" class="form-control" id="bulkSubtitleSelect" placeholder="e.g. en_US, en, es_ES" value="en_US">
+                <small class="form-text text-muted">Leave blank to skip subtitles.</small>
+              </div>
+              <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="bulkAssetsCheck" checked>
+                <label class="form-check-label" for="bulkAssetsCheck">Download Supplementary Assets</label>
+              </div>
+              <hr>
+              <button id="clearCourseLogBtn" class="btn btn-sm btn-outline-danger">Clear Download Cache for this Course</button>
+              <small class="form-text text-muted">The extension tracks downloaded files to resume on crash. Clear this if you want to redownload everything.</small>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+              <button type="button" id="startBulkDownloadBtn" class="btn btn-success">Start Bulk Download</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script type="text/javascript" src="Plugins/Bootstrap-4-4.1.1/js/bootstrap.min.js"></script>
     </body>
 </html>
