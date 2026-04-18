@@ -49,6 +49,50 @@ const App = {
     });
 
     App._bindBulkDownloadEvents();
+    App._initSidebarToggle();
+  },
+
+  /** @private */
+  _initSidebarToggle() {
+    const isCollapsed = localStorage.getItem('sidebar_collapsed') === 'true';
+    if (isCollapsed || window.innerWidth < 1000) {
+      $('#left-side').addClass('collapsed');
+      $('#sidebarToggle i').attr('data-lucide', 'chevron-right');
+    }
+
+    if (window.lucide) { lucide.createIcons(); }
+
+    $('#sidebarToggle').on('click', () => {
+      App.toggleSidebar();
+    });
+
+    $(window).on('resize', () => {
+      if (window.innerWidth < 1000 && !$('#left-side').hasClass('collapsed')) {
+        App.toggleSidebar(true);
+      }
+    });
+  },
+
+  /**
+   * Toggles the sidebar state.
+   * @param {boolean} [forceCollapse]
+   */
+  toggleSidebar(forceCollapse) {
+    const $sidebar = $('#left-side');
+    const $icon = $('#sidebarToggle i');
+
+    if (forceCollapse === true) {
+      $sidebar.addClass('collapsed');
+    } else {
+      $sidebar.toggleClass('collapsed');
+    }
+
+    const isNowCollapsed = $sidebar.hasClass('collapsed');
+    localStorage.setItem('sidebar_collapsed', isNowCollapsed);
+
+    // Update icon
+    $icon.attr('data-lucide', isNowCollapsed ? 'chevron-right' : 'chevron-left');
+    if (window.lucide) { lucide.createIcons(); }
   },
 
   /** @private */

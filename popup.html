@@ -24,39 +24,42 @@
       
     </head>
     <body>
-      <div class="container-fluid">
-        <div class="row">
-          <div class="col-md-3 p-0 m-0 text-white">
-            <div id="left-side">
-              <div id="left-brand">
-                <img src="/logo.png" class="brand-logo">
-                <span>Udemy Downloader</span>
-              </div>
-              <ul class="nav left-side-menu">
-                <li class="active">
-                  <a data-toggle="pill" href="#home"> 
-                    <i data-lucide="home"></i>
-                    &nbsp;Home
-                  </a>
-                </li>
+      <div class="app-layout">
+        <div id="sidebar-container" class="p-0 m-0 text-white">
+          <div id="left-side">
+            <button id="sidebarToggle" title="Toggle Sidebar">
+              <i data-lucide="chevron-left"></i>
+            </button>
+            <div id="left-brand">
+              <img src="/logo.png" class="brand-logo">
+              <span>Udemy Downloader</span>
+            </div>
+            <ul class="nav left-side-menu">
+              <li class="active">
+                <a data-toggle="pill" href="#home"> 
+                  <i data-lucide="home"></i>
+                  <span>Home</span>
+                </a>
+              </li>
 
-                <li>
-                  <a data-toggle="pill" href="#down">
-                    <i data-lucide="help-circle"></i>
-                    &nbsp;F.A.Q.
-                  </a>
-                </li>
-                <li class="donate" style="margin-top:25px;">
-                  <a  href="https://www.patreon.com/ohmcodes" target="_blank"> 
-                    <i data-lucide="heart" style="color:white;"></i>
-                    Give Thanks.
-                  </a>
-                </li>
-              </ul>
-			  <div class="fixed-bottom version text-left pl-4" style="font-size:12px; color: var(--text-muted); padding-bottom: 20px;"></div>
-            </div>
-            </div>
-        <div class="col-md-9 p-0 m-0">
+              <li>
+                <a data-toggle="pill" href="#down">
+                  <i data-lucide="help-circle"></i>
+                  <span>F.A.Q.</span>
+                </a>
+              </li>
+              <li class="donate" style="margin-top:25px;">
+                <a  href="https://www.patreon.com/ohmcodes" target="_blank"> 
+                  <i data-lucide="heart" style="color:white;"></i>
+                  <span>Give Thanks.</span>
+                </a>
+              </li>
+            </ul>
+            <div class="fixed-bottom version text-left pl-4" style="font-size:12px; color: var(--text-muted); padding-bottom: 20px;"></div>
+          </div>
+        </div>
+        
+        <div id="main-view" class="p-0 m-0">
           <div class="tab-content">
             <div id="home" class="tab-pane fade in show active">
               <div class="col-md-12 p-0 m-0">
@@ -124,7 +127,7 @@
                 <div class="faq-body">
                   <p>Please report any issues on our GitHub repository to help us improve.</p>
                   <a href="https://github.com/ohmcodes/UdemyDownloader/issues" target="_blank" class="btn btn-pill btn-outline-primary mt-2" style="border: 1px solid var(--brand-primary); color: var(--brand-primary-light);">
-                    <i data-lucide="github"></i>
+                    <i data-lucide="git-branch"></i>
                     Visit GitHub Issues
                   </a>
                 </div>
@@ -132,8 +135,6 @@
             </div>
           </div>
         </div>
-        
-      </div>
       </div>
 
       <!-- Toast Notifications Container -->

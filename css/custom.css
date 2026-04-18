@@ -28,6 +28,9 @@
   --radius-full: 9999px;
   
   --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  --sidebar-width: 250px;
+  --sidebar-collapsed-width: 80px;
 }
 
 /* ── Base ────────────────────────────────────────────────────────────────── */
@@ -38,6 +41,26 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+/* ── Custom Scrollbar ────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-full);
+  border: 2px solid var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-primary-light);
 }
 
 ::selection {
@@ -58,12 +81,38 @@ tbody tr td {
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+#sidebar-container {
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+#main-view {
+  flex-grow: 1;
+  min-width: 0; /* Prevent flex blowout */
+  overflow-x: hidden;
+}
+
 #left-side {
+  width: var(--sidebar-width);
   height: 100vh;
   background-color: var(--bg-surface);
   border-right: 1px solid var(--glass-border);
   position: relative;
   z-index: 10;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#left-side.collapsed {
+  width: var(--sidebar-collapsed-width);
 }
 
 #left-side #left-brand {
@@ -74,12 +123,23 @@ tbody tr td {
   display: flex;
   align-items: center;
   gap: 12px;
+  position: relative;
+}
+
+#left-side.collapsed #left-brand {
+  padding: 40px 0 20px 0;
+  justify-content: center;
 }
 
 #left-side #left-brand .brand-logo {
   width: 40px !important;
   margin: 0;
   filter: drop-shadow(0 0 8px var(--brand-primary-light));
+  transition: var(--transition);
+}
+
+#left-side.collapsed #left-brand span {
+  display: none;
 }
 
 #left-side #left-brand span {
@@ -89,6 +149,42 @@ tbody tr td {
   background: var(--brand-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  white-space: nowrap;
+}
+
+  #sidebarToggle {
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--brand-primary);
+  border: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  cursor: pointer;
+  z-index: 1000; /* High z-index to stay on top */
+  box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+  transition: var(--transition);
+}
+
+#left-side.collapsed #sidebarToggle {
+  right: 50%;
+  transform: translate(50%, -50%);
+  top: 90px; /* Below logo */
+}
+
+#sidebarToggle:hover {
+  background: var(--brand-primary-light);
+  transform: translateY(-50%) scale(1.1);
+}
+
+#left-side.collapsed #sidebarToggle:hover {
+  transform: translate(50%, -50%) scale(1.1);
 }
 
 #left-side ul.left-side-menu {
@@ -113,6 +209,16 @@ tbody tr td {
   border-radius: var(--radius-md);
   transition: var(--transition);
   text-decoration: none;
+  white-space: nowrap;
+}
+
+#left-side.collapsed ul.left-side-menu li a {
+  justify-content: center;
+  padding: 12px 0;
+}
+
+#left-side.collapsed ul.left-side-menu li a span {
+  display: none;
 }
 
 #left-side ul.left-side-menu li.active a {
@@ -144,6 +250,25 @@ tbody tr td {
   background-color: rgba(164, 53, 240, 0.1) !important;
   border-color: var(--brand-primary) !important;
   color: white !important;
+}
+
+#left-side.collapsed .donate a {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 10px auto;
+  border-radius: var(--radius-full);
+}
+
+#left-side.collapsed .donate a span {
+  display: none;
+}
+
+#left-side.collapsed .version {
+  display: none;
 }
 
 /* ── General button overrides ────────────────────────────────────────────── */
@@ -227,6 +352,13 @@ tbody tr td {
 .dataTables_wrapper .dataTables_length,
 .dataTables_wrapper .dataTables_filter {
   padding: 20px;
+  position: relative;
+  z-index: 10;
+}
+
+div.dataTables_filter {
+  float: right;
+  margin-bottom: 10px;
 }
 
 div.dataTables_filter input {
@@ -277,8 +409,8 @@ table.dataTable tbody tr td:last-child {
 
 table.dataTable tbody tr:hover {
   background-color: var(--bg-elevated) !important;
-  transform: scale(1.005);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px); /* Lift effect instead of scale to prevent overflow */
   z-index: 5;
   position: relative;
 }
@@ -335,19 +467,35 @@ table.dataTable tbody tr:hover .course-thumbnail {
 
 .dataTables_paginate .paginate_button {
   border-radius: var(--radius-md) !important;
-  border: none !important;
+  border: 1px solid var(--glass-border) !important;
   background: var(--bg-surface) !important;
   color: var(--text-muted) !important;
   margin: 0 4px !important;
   padding: 8px 16px !important;
   transition: var(--transition);
+  cursor: pointer;
+}
+
+.dataTables_paginate .paginate_button:hover {
+  background: var(--bg-elevated) !important;
+  color: var(--text-main) !important;
+  border-color: var(--brand-primary-light) !important;
 }
 
 .dataTables_paginate .paginate_button.current,
-.dataTables_paginate .paginate_button:hover {
+.dataTables_paginate .paginate_button.current:hover {
   background: var(--brand-gradient) !important;
   color: white !important;
+  border: none !important;
   box-shadow: 0 4px 12px rgba(164, 53, 240, 0.3);
+}
+
+.dataTables_paginate .paginate_button.disabled,
+.dataTables_paginate .paginate_button.disabled:hover {
+  background: var(--bg-surface) !important;
+  color: var(--bg-elevated) !important;
+  border-color: var(--glass-border) !important;
+  cursor: default;
 }
 
 .dataTables_info {

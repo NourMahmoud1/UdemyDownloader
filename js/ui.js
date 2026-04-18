@@ -115,14 +115,13 @@ const UI = {
       },
       initComplete() {
         // Position length & filter controls
-        $('#linkTable_length').attr('style', 'position:relative; display:inline; left:2%;');
-        $('#linkTable_length label').attr('style', 'padding-top: 5px;');
-        $('#linkTable_filter').attr('style', 'position:absolute; display:inline; right:1.4%;');
+        $('.dataTables_length').addClass('bs-select');
+        
+        // Ensure scroll body has consistent height
         $('.dataTables_scrollBody').attr(
           'style',
           'position: relative; overflow: auto; width: 100%; max-height:472px; height:472px;'
         );
-        $('.dataTables_length').addClass('bs-select');
 
         // Attach progress bars and checkbox listeners
         const rows      = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
