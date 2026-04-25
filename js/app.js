@@ -49,6 +49,7 @@ const App = {
     });
 
     App._bindBulkDownloadEvents();
+    App._bindCancelEvent();
     App._initSidebarToggle();
   },
 
@@ -144,6 +145,7 @@ const App = {
 
       DownloadManager.startSequential(queue, App.CourseId, () => {
         console.log('[App] Bulk download complete.');
+        App._reEnableButtons();
       });
     });
 
@@ -158,15 +160,36 @@ const App = {
     });
   },
 
+  /** Binds the cancel download button. @private */
+  _bindCancelEvent() {
+    $('#cancelDownloadBtn').on('click', () => {
+      DownloadManager.cancelQueue();
+    });
+  },
+
+  /**
+   * Re-enables download buttons after a queue completes.
+   * @private
+   */
+  _reEnableButtons() {
+    const rows = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
+    rows.find('td').find('[class*="btn-download"]').prop('disabled', false);
+    rows.find('td').find('[class*="btn-download"]:contains(Downloaded)')
+      .text('Re-Download').removeClass('btn-danger').addClass('btn-success');
+
+    const checked = rows.find('td').find('input').filter('input:checked').length;
+    if (checked > 0) $('#SelectedVideos').prop('disabled', false);
+  },
+
   // ── Data loading ──────────────────────────────────────────────────────────
 
   /**
    * Fetches and renders the subscribed-course list.
    */
-  loadCourses() {
+  async loadCourses() {
     try {
       UI.showSkeleton(5);
-      const data = UdemyAPI.fetchCourses();
+      const data = await UdemyAPI.fetchCourses();
       UI.renderCourseList(data);
       UI.showToast('Courses loaded successfully', 'check-circle');
     } catch (err) {

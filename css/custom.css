@@ -498,6 +498,36 @@ table.dataTable tbody tr:hover .course-thumbnail {
   cursor: default;
 }
 
+/* ── Bootstrap Pagination Overrides ──────────────────────────────────────── */
+.page-item .page-link {
+  background-color: var(--bg-surface) !important;
+  border: 1px solid var(--glass-border) !important;
+  color: var(--text-muted) !important;
+  padding: 8px 16px;
+  transition: var(--transition);
+}
+
+.page-item .page-link:hover {
+  background-color: var(--bg-elevated) !important;
+  color: var(--text-main) !important;
+  border-color: var(--brand-primary-light) !important;
+  z-index: 2;
+}
+
+.page-item.active .page-link {
+  background: var(--brand-gradient) !important;
+  border-color: transparent !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(164, 53, 240, 0.3);
+}
+
+.page-item.disabled .page-link {
+  background-color: var(--bg-surface) !important;
+  border-color: var(--glass-border) !important;
+  color: var(--bg-elevated) !important;
+  opacity: 0.6;
+}
+
 .dataTables_info {
   display: inline-block;
   background: var(--bg-surface);
@@ -900,4 +930,72 @@ span.icon::before {
 
 .bg-main {
   background-color: var(--bg-main) !important;
+}
+
+/* ── Cancel Download Button ──────────────────────────────────────────────── */
+.btn-cancel-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 12px 20px;
+  padding: 10px 24px;
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+  border-radius: var(--radius-full) !important;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: var(--transition);
+  cursor: pointer;
+  animation: cancelPulse 2s ease-in-out infinite;
+}
+
+.btn-cancel-download:hover {
+  background: rgba(239, 68, 68, 0.3) !important;
+  color: #fca5a5 !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.btn-cancel-download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  animation: none;
+}
+
+@keyframes cancelPulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(239, 68, 68, 0); }
+  50% { box-shadow: 0 0 16px rgba(239, 68, 68, 0.15); }
+}
+
+/* ── Overall Progress Bar ────────────────────────────────────────────────── */
+.overall-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 12px 20px;
+  padding: 12px 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.overall-progress-bar .progress {
+  flex: 1;
+  height: 6px !important;
+  background: var(--glass-border) !important;
+  border: none !important;
+}
+
+.overall-progress-bar .progress-bar {
+  background: var(--brand-gradient) !important;
+  transition: width 0.5s ease !important;
+  border-radius: var(--radius-full) !important;
 }

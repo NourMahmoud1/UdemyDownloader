@@ -13,6 +13,12 @@ const DownloadManager = {
   /** Reference to the onChanged listener so it can be removed */
   _onChangedListener: null,
 
+  /** Whether the user has requested cancellation of the current queue */
+  _cancelled: false,
+
+  /** Maximum number of retry attempts for a failed download */
+  MAX_RETRIES: 3,
+
   /** State shared with the progress poller */
   _poll: {
     downId:       null,
@@ -20,7 +26,22 @@ const DownloadManager = {
     progressBar:  null,
     videoRowIndex: null,
     currentPage:  null,
-    MS:           10,
+    MS:           500,
+  },
+
+  /** Overall queue progress state */
+  _progress: {
+    current: 0,
+    total:   0,
+  },
+
+  /** Cached DOM references for the currently downloading row (avoids repeated jQuery lookups) */
+  _cachedRow: {
+    trid:        null,
+    progressDiv: null,
+    progressBar: null,
+    downloadBtn: null,
+    row:         null,
   },
 
   // ── Queue builder ──────────────────────────────────────────────────────────
@@ -126,23 +147,66 @@ const DownloadManager = {
    * @param {Function}       onComplete - Called after all items finish
    */
   startSequential(queue, courseId, onComplete) {
-    let index         = 0;
+    // ── FIX #2: Clean up any previous listener to prevent stacking ────────
+    if (DownloadManager._onChangedListener) {
+      chrome.downloads.onChanged.removeListener(DownloadManager._onChangedListener);
+      DownloadManager._onChangedListener = null;
+    }
+
+    let index           = 0;
+    let retryCount      = 0;
     const downloadDelay = parseInt(Storage.getSetting('download_delay'), 10);
 
-    // The onChanged listener must close over `index` so it always reads the
-    // current value, not a snapshot taken at registration time.
+    // Reset cancellation flag and overall progress
+    DownloadManager._cancelled = false;
+    DownloadManager._progress.current = 0;
+    DownloadManager._progress.total   = queue.length;
+    DownloadManager._updateOverallProgress();
+
+    // Show the cancel button
+    $('#cancelDownloadBtn').show().prop('disabled', false);
+
+    // The onChanged listener closes over `currentItem` so it always reads
+    // the correct reference, not a snapshot taken at registration time.
+    let currentItem = null;
+
     function onChanged({ id, state }) {
       if (id !== DownloadManager._currentId) return;
 
       if (state && state.current !== 'in_progress') {
-        // Download finished (complete or interrupted)
+        // ── FIX #14: Distinguish complete vs interrupted ────────────────
         if (state.current === 'complete') {
-          const item = queue[index - 1];
-          if (item) Storage.markDownloaded(item.foldername + item.filename, courseId);
-        }
+          // ── FIX #4: Use captured `currentItem` instead of index arithmetic
+          if (currentItem) {
+            Storage.markDownloaded(currentItem.foldername + currentItem.filename, courseId);
+          }
+          DownloadManager._onDownloadFinished('complete');
+          retryCount = 0;
+          DownloadManager._progress.current++;
+          DownloadManager._updateOverallProgress();
+          setTimeout(next, downloadDelay);
 
-        DownloadManager._onDownloadFinished();
-        setTimeout(next, downloadDelay);
+        } else if (state.current === 'interrupted') {
+          // ── FIX #11: Retry up to MAX_RETRIES before giving up ─────────
+          retryCount++;
+          if (retryCount <= DownloadManager.MAX_RETRIES && currentItem) {
+            console.warn(
+              `[DownloadManager] Download interrupted, retrying (${retryCount}/${DownloadManager.MAX_RETRIES}):`,
+              currentItem.foldername + currentItem.filename
+            );
+            DownloadManager._onDownloadFinished('retrying');
+            // Retry the same item — decrement index so `next()` re-processes it
+            index--;
+            setTimeout(next, downloadDelay * 2);
+          } else {
+            console.error('[DownloadManager] Download failed after retries:', currentItem?.filename);
+            DownloadManager._onDownloadFinished('failed');
+            retryCount = 0;
+            DownloadManager._progress.current++;
+            DownloadManager._updateOverallProgress();
+            setTimeout(next, downloadDelay);
+          }
+        }
       } else if (id > 0) {
         // Still downloading — start progress polling
         setTimeout(() => DownloadManager._pollProgress(id), 250);
@@ -162,17 +226,14 @@ const DownloadManager = {
     next();
 
     function next() {
+      // ── FIX #10: Check cancellation flag ──────────────────────────────
+      if (DownloadManager._cancelled) {
+        cleanup('Download cancelled by user.');
+        return;
+      }
+
       if (index >= queue.length) {
-        chrome.downloads.onChanged.removeListener(onChanged);
-
-        chrome.notifications.create({
-          type:     'basic',
-          iconUrl:  'logo.png',
-          title:    'Download Complete!',
-          message:  'Finished ' + queue.length + ' file(s).',
-        });
-
-        onComplete();
+        cleanup('Finished ' + queue.length + ' file(s).');
         return;
       }
 
@@ -183,32 +244,89 @@ const DownloadManager = {
       if (alreadyDone) {
         console.log('[DownloadManager] Skipping already downloaded:', fullPath);
         index++;
+        DownloadManager._progress.current++;
+        DownloadManager._updateOverallProgress();
         setTimeout(next, 0); // yield control, then continue
         return;
       }
 
+      // ── FIX #4: Capture item reference BEFORE incrementing ────────────
+      currentItem = item;
       index++;
 
-      if (item.fileurl) {
-        console.log('[DownloadManager] Downloading:', fullPath);
-
-        // Find the DataTable row for UI feedback
-        DownloadManager._locateTableRow(item.trid);
-
-        chrome.downloads.download(
-          {
-            url:            item.fileurl,
-            filename:       fullPath,
-            saveAs:         false,
-            conflictAction: 'overwrite',
-          },
-          (id) => {
-            DownloadManager._currentId = id;
-          }
-        );
+      // ── FIX #1: Handle falsy fileurl — skip instead of hanging ────────
+      if (!item.fileurl) {
+        console.warn('[DownloadManager] No URL for item, skipping:', fullPath);
+        DownloadManager._progress.current++;
+        DownloadManager._updateOverallProgress();
+        setTimeout(next, 0);
+        return;
       }
-      // If fileurl is falsy, we simply don't initiate a download.
-      // The onChanged listener won't fire, so this item is effectively skipped.
+
+      console.log('[DownloadManager] Downloading:', fullPath);
+
+      // Find the DataTable row for UI feedback
+      DownloadManager._locateTableRow(item.trid);
+
+      chrome.downloads.download(
+        {
+          url:            item.fileurl,
+          filename:       fullPath,
+          saveAs:         false,
+          conflictAction: 'overwrite',
+        },
+        (id) => {
+          // ── FIX #3: Handle chrome.downloads.download() failure ────────
+          if (chrome.runtime.lastError || !id) {
+            console.error(
+              '[DownloadManager] Download API error:',
+              chrome.runtime.lastError?.message || 'unknown error'
+            );
+            DownloadManager._onDownloadFinished('failed');
+            DownloadManager._progress.current++;
+            DownloadManager._updateOverallProgress();
+            setTimeout(next, downloadDelay);
+            return;
+          }
+          DownloadManager._currentId = id;
+        }
+      );
+    }
+
+    function cleanup(message) {
+      chrome.downloads.onChanged.removeListener(onChanged);
+      DownloadManager._onChangedListener = null;
+      DownloadManager._currentId = null;
+
+      // Hide cancel button
+      $('#cancelDownloadBtn').hide();
+
+      // Clear overall progress display
+      $('#overallProgress').hide();
+
+      chrome.notifications.create({
+        type:     'basic',
+        iconUrl:  'logo.png',
+        title:    DownloadManager._cancelled ? 'Download Cancelled' : 'Download Complete!',
+        message:  message,
+      });
+
+      onComplete();
+    }
+  },
+
+  /**
+   * Cancels the current download queue. The active download is also cancelled.
+   */
+  cancelQueue() {
+    DownloadManager._cancelled = true;
+    $('#cancelDownloadBtn').prop('disabled', true).text('Cancelling…');
+
+    // Cancel the active chrome download if one is in progress
+    if (DownloadManager._currentId) {
+      chrome.downloads.cancel(DownloadManager._currentId, () => {
+        console.log('[DownloadManager] Active download cancelled.');
+      });
     }
   },
 
@@ -229,24 +347,91 @@ const DownloadManager = {
     DownloadManager._poll.currentPage   = parseInt(
       $('.pagination').find('[class*="active"] a').attr('data-dt-idx')
     ) - 1;
+
+    // ── FIX #15: Cache DOM references for the current row ────────────────
+    DownloadManager._cacheRowElements(trid);
   },
 
+  /**
+   * Caches jQuery references for the row being downloaded to avoid
+   * repeated DOM lookups in the hot polling path.
+   * @private
+   */
+  _cacheRowElements(trid) {
+    const rows  = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
+    const sel   = '[id*=' + trid + ']';
+    const $row  = rows.filter(sel);
 
+    DownloadManager._cachedRow = {
+      trid,
+      row:         $row,
+      progressDiv: $row.find('td').eq(3).find('div').filter('[class="progress"]'),
+      progressBar: $row.find('td').eq(3).find('div').filter('[class="progress-bar"]'),
+      downloadBtn: $row.find('td').eq(3).find('button'),
+    };
+  },
 
+  /**
+   * Updates the overall progress indicator (X of Y).
+   * @private
+   */
+  _updateOverallProgress() {
+    const { current, total } = DownloadManager._progress;
+    let $el = $('#overallProgress');
 
-  /** Updates the UI after a download finishes or is interrupted. @private */
-  _onDownloadFinished() {
-    const rows          = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-    const bar           = DownloadManager._poll.progressBar;
-    const downloadBtn   = rows.filter('[id*=' + bar + ']').find('td').eq(3).find('button');
-    const progressBar   = rows.filter('[id*=' + bar + ']').find('td').eq(3).find('div').filter('[class="progress-bar"]');
-    const inputChecked  = rows.filter('[id*=' + bar + ']').find('td').eq(0).find('input').filter('input:checked');
+    if ($el.length === 0) {
+      // Create the element if it doesn't exist
+      $('#example').before(
+        '<div id="overallProgress" class="overall-progress-bar">' +
+        '<span id="overallProgressText"></span>' +
+        '<div class="progress" style="height:6px; flex:1; background:var(--glass-border);">' +
+        '<div id="overallProgressFill" class="progress-bar" role="progressbar" ' +
+        'style="width:0%; background: var(--brand-primary-light);"></div></div></div>'
+      );
+      $el = $('#overallProgress');
+    }
 
-    downloadBtn.text('Downloaded');
-    downloadBtn.removeClass('btn-warning').addClass('btn-danger');
-    progressBar.css('width', '100%').css('background-color', 'var(--warning)').prop('disabled', true);
-    rows.filter('[id*=' + bar + ']').removeClass('blink');
+    $el.show();
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    $('#overallProgressText').text(`Downloading ${current} of ${total}`);
+    $('#overallProgressFill').css('width', pct + '%');
+  },
 
+  /** Updates the UI after a download finishes, is interrupted, or fails. @private */
+  _onDownloadFinished(status = 'complete') {
+    const { row, downloadBtn, progressBar } = DownloadManager._cachedRow;
+
+    if (!row || row.length === 0) {
+      // Fallback to uncached lookup
+      const rows = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
+      const bar  = DownloadManager._poll.progressBar;
+      const sel  = '[id*=' + bar + ']';
+      DownloadManager._cachedRow.row         = rows.filter(sel);
+      DownloadManager._cachedRow.downloadBtn = rows.filter(sel).find('td').eq(3).find('button');
+      DownloadManager._cachedRow.progressBar = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress-bar"]');
+    }
+
+    const $btn = DownloadManager._cachedRow.downloadBtn;
+    const $bar = DownloadManager._cachedRow.progressBar;
+    const $row = DownloadManager._cachedRow.row;
+
+    if (status === 'complete') {
+      $btn.text('Downloaded');
+      $btn.removeClass('btn-warning btn-success').addClass('btn-danger');
+      $bar.css('width', '100%').css('background-color', 'var(--warning)').prop('disabled', true);
+    } else if (status === 'failed') {
+      $btn.text('Failed');
+      $btn.removeClass('btn-warning btn-success').addClass('btn-danger');
+      $bar.css('width', '100%').css('background-color', '#dc3545').prop('disabled', true);
+    } else if (status === 'retrying') {
+      $btn.text('Retrying…');
+      $btn.removeClass('btn-success').addClass('btn-warning');
+    }
+
+    $row.removeClass('blink');
+
+    // Uncheck the checkbox if it was selected
+    const inputChecked = $row.find('td').eq(0).find('input').filter('input:checked');
     if (inputChecked.length === 1) {
       inputChecked.prop('checked', false);
       inputChecked.parent(0).parent(0).parent(0).removeClass('selected-td');
@@ -291,12 +476,28 @@ const DownloadManager = {
 
         if (!item.totalBytes) return;
 
-        const pct    = parseInt((item.bytesReceived / item.totalBytes) * 100, 10);
-        const rows   = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-        const sel    = '[id*=' + poll.progressBar + ']';
-        const pDiv   = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress"]');
-        const pBar   = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress-bar"]');
-        const dlBtn  = rows.filter(sel).find('td').eq(3).find('button');
+        const pct = parseInt((item.bytesReceived / item.totalBytes) * 100, 10);
+
+        // ── FIX #15: Use cached DOM references ──────────────────────────
+        const cached = DownloadManager._cachedRow;
+        let pDiv, pBar, dlBtn;
+
+        if (cached.trid === poll.progressBar && cached.progressDiv) {
+          pDiv  = cached.progressDiv;
+          pBar  = cached.progressBar;
+          dlBtn = cached.downloadBtn;
+        } else {
+          // Fallback to DOM lookup and re-cache
+          const rows = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
+          const sel  = '[id*=' + poll.progressBar + ']';
+          pDiv  = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress"]');
+          pBar  = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress-bar"]');
+          dlBtn = rows.filter(sel).find('td').eq(3).find('button');
+
+          DownloadManager._cachedRow.progressDiv = pDiv;
+          DownloadManager._cachedRow.progressBar = pBar;
+          DownloadManager._cachedRow.downloadBtn = dlBtn;
+        }
 
         // First-time show
         if (pDiv.is(':hidden')) {
@@ -307,7 +508,8 @@ const DownloadManager = {
 
         // Update bar
         pBar.css('width', pct + '%').text(pct + '%');
-        rows.filter(sel).addClass('blink');
+
+        if (cached.row) cached.row.addClass('blink');
 
         // Schedule next poll
         if (poll.tid < 0) {

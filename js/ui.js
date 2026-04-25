@@ -181,6 +181,7 @@ const UI = {
       const template   = Storage.getSetting('default_naming_template');
       const ext        = video.Type === 'Article' ? '.html' : '.mp4';
       const folder     = Storage.getSetting('default_folder');
+      const includeAssets = Storage.getSetting('default_assets') === 'true';
 
       const selectedUrl  = $row.find('.quality-select').length > 0
         ? $row.find('.quality-select').val()
@@ -205,15 +206,25 @@ const UI = {
         });
       }
 
-      DownloadManager.startSequential(queue, App.CourseId, () => {
-        // Re-enable buttons and refresh "Downloaded" labels
-        const rows = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-        rows.find('td').find('[class*="btn-download"]').prop('disabled', false);
-        rows.find('td').find('[class*="btn-download"]:contains(Downloaded)')
-          .text('Re-Download').removeClass('btn-danger').addClass('btn-success');
+      // FIX #9: Include supplementary assets in single download
+      if (includeAssets && video.Assets && video.Assets.length > 0) {
+        video.Assets.forEach((asset) => {
+          if (asset.download_urls && asset.download_urls.File) {
+            const extMatch     = asset.filename.match(/(\.[^.]+)$/);
+            const aExt         = extMatch ? extMatch[1] : '';
+            const titleWithout = extMatch ? asset.filename.replace(/(\.[^.]+)$/, '') : asset.filename;
+            queue.push({
+              trid:       rowId + '_asset_' + asset.id,
+              fileurl:    asset.download_urls.File[0].file,
+              foldername: folder,
+              filename:   buildPath(template, video, course, aExt, '{video_title} - ' + titleWithout),
+            });
+          }
+        });
+      }
 
-        const checked = rows.find('td').find('input').filter('input:checked').length;
-        if (checked > 0) $('#SelectedVideos').prop('disabled', false);
+      DownloadManager.startSequential(queue, App.CourseId, () => {
+        App._reEnableButtons();
       });
     } else {
       alert('Malformed data, please try again.');
@@ -461,10 +472,11 @@ const UI = {
         action() {
           $('#linkTable').dataTable().fnPageChange(0);
 
-          const folder   = Storage.getSetting('default_folder');
-          const template = Storage.getSetting('default_naming_template');
-          const rows     = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-          const queue    = [];
+          const folder        = Storage.getSetting('default_folder');
+          const template      = Storage.getSetting('default_naming_template');
+          const includeAssets = Storage.getSetting('default_assets') === 'true';
+          const rows          = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
+          const queue         = [];
 
           rows.find('td').find('input').filter('input:checked').each(function () {
             const rowId  = $(this).parents('td').parents('tr').attr('id');
@@ -491,15 +503,27 @@ const UI = {
                 filename:   buildPath(template, video, course, '.vtt'),
               });
             }
+
+            // FIX #9: Include supplementary assets in selected download
+            if (includeAssets && video.Assets && video.Assets.length > 0) {
+              video.Assets.forEach((asset) => {
+                if (asset.download_urls && asset.download_urls.File) {
+                  const extMatch     = asset.filename.match(/(\.[^.]+)$/);
+                  const aExt         = extMatch ? extMatch[1] : '';
+                  const titleWithout = extMatch ? asset.filename.replace(/(\.[^.]+)$/, '') : asset.filename;
+                  queue.push({
+                    trid:       rowId + '_asset_' + asset.id,
+                    fileurl:    asset.download_urls.File[0].file,
+                    foldername: folder,
+                    filename:   buildPath(template, video, course, aExt, '{video_title} - ' + titleWithout),
+                  });
+                }
+              });
+            }
           });
 
           DownloadManager.startSequential(queue, App.CourseId, () => {
-            const rows = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-            rows.find('td').find('[class*="btn-download"]').prop('disabled', false);
-            rows.find('td').find('[class*="btn-download"]:contains(Downloaded)')
-              .text('Re-Download').removeClass('btn-danger').addClass('btn-success');
-            const checked = rows.find('td').find('input').filter('input:checked').length;
-            if (checked > 0) $('#SelectedVideos').prop('disabled', false);
+            App._reEnableButtons();
           });
         },
       },

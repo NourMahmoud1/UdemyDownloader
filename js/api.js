@@ -65,34 +65,49 @@ const UdemyAPI = {
   },
 
   /**
-   * Performs a synchronous AJAX request to the Udemy API.
+   * Performs an async fetch request to the Udemy API.
    * Returns the parsed JSON response, or `null` on error.
    *
-   * NOTE: `async: false` is intentional here — the extension processes the
-   * video list sequentially to avoid overwhelming the API.
+   * Converted from synchronous $.ajax to async fetch() to prevent UI freezing.
    *
    * @param {object} config        - { url, type, data }
    * @param {object} [counterObj]  - Passed to UI.updateCounter on each 200 response
-   * @returns {object|null}
+   * @returns {Promise<object|null>}
    */
-  request(config, counterObj = '') {
-    const result = $.ajax({
-      url:     config.url,
-      type:    config.type || 'GET',
-      headers: UdemyAPI._buildHeaders(),
-      async:   false,
-      data:    config.data || {},
-      statusCode: {
-        200(response) {
-          UI.updateCounter(counterObj);
-          return response;
-        },
-        404() {
-          console.warn('[UdemyAPI] 404 – resource not found:', config.url);
-        },
-      },
-    });
-    return result.responseJSON || null;
+  async request(config, counterObj = '') {
+    try {
+      // Build query string from data object for GET requests
+      let url = config.url;
+      if (config.data && Object.keys(config.data).length > 0) {
+        const params = new URLSearchParams();
+        Object.entries(config.data).forEach(([key, value]) => {
+          params.append(key, value);
+        });
+        url += (url.includes('?') ? '&' : '?') + params.toString();
+      }
+
+      const response = await fetch(url, {
+        method:  config.type || 'GET',
+        headers: UdemyAPI._buildHeaders(),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        UI.updateCounter(counterObj);
+        return data;
+      }
+
+      if (response.status === 404) {
+        console.warn('[UdemyAPI] 404 – resource not found:', config.url);
+      } else {
+        console.warn('[UdemyAPI] HTTP', response.status, '–', config.url);
+      }
+
+      return null;
+    } catch (err) {
+      console.error('[UdemyAPI] Network error:', err.message, config.url);
+      return null;
+    }
   },
 
   // ── High-level fetch methods ───────────────────────────────────────────────
@@ -101,9 +116,9 @@ const UdemyAPI = {
    * Fetches the full subscribed course list.
    * Uses LocalStorage cache to avoid redundant API calls.
    *
-   * @returns {object}  Udemy API response with `.results` array
+   * @returns {Promise<object>}  Udemy API response with `.results` array
    */
-  fetchCourses() {
+  async fetchCourses() {
     const CACHE_KEY      = 'LoadedAllCourses';
     const CACHE_DATA_KEY = 'LoadedData';
     const alreadyLoaded  = Storage.load(CACHE_KEY);
@@ -124,15 +139,19 @@ const UdemyAPI = {
       },
     };
 
-    let data       = UdemyAPI.request(config);
-    const total    = parseInt(Math.ceil(data.count / 100), 10);
+    let data = await UdemyAPI.request(config);
+    if (!data) return { results: [] };
+
+    const total = parseInt(Math.ceil(data.count / 100), 10);
 
     // Fetch additional pages when there are more than 100 courses
     if (data.count > 100) {
       for (let i = 0; i < total - 1; i++) {
         config.data.page += 1;
-        const more = UdemyAPI.request(config);
-        if (more) $.merge(data.results, more.results);
+        const more = await UdemyAPI.request(config);
+        if (more && more.results) {
+          data.results = data.results.concat(more.results);
+        }
       }
     }
 
@@ -146,9 +165,9 @@ const UdemyAPI = {
    * Uses LocalStorage cache keyed by course ID.
    *
    * @param {string|number} courseId
-   * @returns {object}  Raw API response with `.results` array
+   * @returns {Promise<object>}  Raw API response with `.results` array
    */
-  fetchPlaylist(courseId) {
+  async fetchPlaylist(courseId) {
     const CACHE_KEY = 'LoadedVideoList';
     let cachedList  = Storage.load(CACHE_KEY);
 
@@ -173,7 +192,7 @@ const UdemyAPI = {
       },
     };
 
-    const response = UdemyAPI.request(config);
+    const response = await UdemyAPI.request(config);
     if (response) {
       cachedList.push({ courseID: courseId, videoList: response });
       Storage.save(CACHE_KEY, cachedList);
@@ -187,9 +206,9 @@ const UdemyAPI = {
    * @param {string|number} courseId
    * @param {string|number} lectureId
    * @param {object}        counterObj  - Passed through to UI.updateCounter
-   * @returns {object|null}
+   * @returns {Promise<object|null>}
    */
-  fetchVideoDetails(courseId, lectureId, counterObj) {
+  async fetchVideoDetails(courseId, lectureId, counterObj) {
     const config = {
       url:  UdemyAPI.domain + '/api-2.0/users/me/subscribed-courses/' + courseId + '/lectures/' + lectureId,
       type: 'GET',
@@ -212,7 +231,7 @@ const UdemyAPI = {
    * @returns {Promise<Array>}
    */
   async buildVideoList(courseId, onProgress) {
-    const rawPlaylist = UdemyAPI.fetchPlaylist(courseId);
+    const rawPlaylist = await UdemyAPI.fetchPlaylist(courseId);
     if (!rawPlaylist) return [];
 
     // Filter to lectures (videos + articles) and attach chapter info
@@ -238,7 +257,7 @@ const UdemyAPI = {
       try {
         await waitFor(apiDelay);
 
-        const details = UdemyAPI.fetchVideoDetails(courseId, lecture.id, { Current: index + 1 });
+        const details = await UdemyAPI.fetchVideoDetails(courseId, lecture.id, { Current: index + 1 });
         onProgress(index + 1, lectures.length);
 
         const entry = UdemyAPI._normaliseLecture(lecture, details);
