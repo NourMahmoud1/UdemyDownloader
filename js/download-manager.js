@@ -342,11 +342,20 @@ const DownloadManager = {
       if (v.id == trid) rowIndex = k;
     });
 
-    DownloadManager._poll.progressBar  = trid;
+    DownloadManager._poll.progressBar   = trid;
     DownloadManager._poll.videoRowIndex = rowIndex;
-    DownloadManager._poll.currentPage   = parseInt(
-      $('.pagination').find('[class*="active"] a').attr('data-dt-idx')
-    ) - 1;
+
+    // Robust active-page detection — data-dt-idx is unreliable in Bootstrap pagination.
+    // Use DataTables' own fnPagingInfo() first, then fall back to row-index math.
+    let currentPage = 0;
+    try {
+      const info = $('#linkTable').dataTable().fnPagingInfo();
+      currentPage = (info && !isNaN(info.iPage)) ? info.iPage : 0;
+    } catch (e) {
+      const pageSize = $('#linkTable').dataTable().fnSettings()._iDisplayLength || 5;
+      currentPage = rowIndex !== null ? Math.floor(rowIndex / pageSize) : 0;
+    }
+    DownloadManager._poll.currentPage = currentPage;
 
     // ── FIX #15: Cache DOM references for the current row ────────────────
     DownloadManager._cacheRowElements(trid);

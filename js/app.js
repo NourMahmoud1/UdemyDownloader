@@ -98,7 +98,7 @@ const App = {
 
   /** @private */
   _setupLoggedIn() {
-    $('.sonar-wrapper').hide();
+    // Keep sonar running on the hero — only hide it once the user clicks Analyze
     $('.btn-container').show();
 
     $('#analyze').html('<i data-lucide="search" style="width:24px;height:24px;vertical-align:middle;margin-right:8px;"></i> My Courses');
@@ -107,7 +107,7 @@ const App = {
     $('#analyze').on('click', () => {
       $('.btn-container').hide();
       $('#analyze').prop('disabled', true).text('Analyzing…');
-      $('.sonar-wrapper').show();
+      // sonar-wrapper is already visible; keep it showing during load
       $('#total-text').text('Please wait, analyzing…');
       setTimeout(() => App.loadCourses(), 1000);
     });
@@ -133,7 +133,14 @@ const App = {
       const folder       = Storage.getSetting('default_folder');
       const template     = Storage.getSetting('default_naming_template');
 
-      const courseDetail = App.CourseData.Data.results.find((c) => c.id == App.CourseId);
+      const courseDetail = App.CourseData && App.CourseData.Data && App.CourseData.Data.results
+        ? App.CourseData.Data.results.find((c) => c.id == App.CourseId)
+        : null;
+
+      if (!courseDetail) {
+        UI.showToast('Course data unavailable. Please re-load the course.', 'alert-circle');
+        return;
+      }
 
       const queue = DownloadManager.buildQueue(App.data, courseDetail, {
         quality,
@@ -153,9 +160,10 @@ const App = {
     $('#clearCourseLogBtn').on('click', () => {
       if (App.CourseId) {
         Storage.clearDownloadLog(App.CourseId);
-        alert('Download history cleared for this course.');
+        $('#bulkDownloadModal').modal('hide');
+        UI.showToast('Download cache cleared for this course.', 'trash-2');
       } else {
-        alert('Open a course first.');
+        UI.showToast('Open a course first.', 'alert-circle');
       }
     });
   },

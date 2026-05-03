@@ -24,7 +24,7 @@ const UI = {
 
   // ── Loading spinner ───────────────────────────────────────────────────────
 
-  showLoading()  { $('.sonar-wrapper').show(); },
+  showLoading()  { $('.hero-section').show(); $('.sonar-wrapper').show(); $('.btn-container').hide(); },
   hideLoading()  { $('.sonar-wrapper').hide(); },
 
   /**
@@ -240,11 +240,12 @@ const UI = {
   renderCourseList(apiData) {
     $('#counter').hide();
     UI.hideLoading();
-    $('.btn-container').hide();
+    $('.hero-section').hide();
 
-    App.type        = 'Course';
-    App.CourseData  = { Data: apiData };
-    App.data        = apiData.results;
+    App.type       = 'Course';
+    // Normalise: always store raw API data so .Data.results is always valid
+    App.CourseData = { Data: apiData };
+    App.data       = apiData.results || [];
 
     if (!apiData.results || apiData.results.length === 0) {
       UI._renderEmptyState('No courses found. Try fetching again.');
@@ -278,6 +279,7 @@ const UI = {
           className: 'btn-sm btn-danger btn-width-100', // Still full width but styled better in CSS
           action() {
             $('#example').empty();
+            $('.hero-section').show();
             UI.showLoading();
             $('#counter').show();
             $('#message').hide();
@@ -311,10 +313,18 @@ const UI = {
   renderPlaylist(videoList) {
     $('#counter').hide();
     UI.hideLoading();
-    $('.btn-container').hide();
+    $('.hero-section').hide();
 
     App.type = 'Download';
     App.data = videoList;
+
+    // If there were fetch errors, show a prominent toast so the user notices
+    if (App.errors > 0) {
+      UI.showToast(
+        App.errors + ' lecture' + (App.errors === 1 ? '' : 's') + ' failed to load. Re-Analyze to retry.',
+        'alert-triangle'
+      );
+    }
 
     if (!videoList || videoList.length === 0) {
       UI._renderEmptyState('This course seems empty or couldn\'t be loaded.');
@@ -408,6 +418,7 @@ const UI = {
         text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="chevrons-left" style="width:14px;height:14px;"></i> <span>Back</span></div>',
         className: 'btn-sm btn-danger btn-width-5 btn-right',
         action() {
+          $('.hero-section').show();
           UI.showLoading();
           $('#example').empty();
           App.loadCourses();
@@ -436,7 +447,14 @@ const UI = {
         },
       },
       {
-        text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> <span>Re-Analyze</span></div>',
+        text() {
+          const errCount = App.errors || 0;
+          const badge = errCount > 0
+            ? ` <span style="background:rgba(239,68,68,0.85);color:#fff;font-size:10px;font-weight:700;
+                border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;">${errCount}</span>`
+            : '';
+          return `<div class="d-flex align-items-center gap-2"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i> <span>Re-Analyze</span>${badge}</div>`;
+        },
         className: 'btn-sm btn-danger btn-width-35 btn-right',
         action() {
           $('#example').empty();

@@ -424,7 +424,17 @@
         These actions cannot be undone. The extension tracks completed downloads to support resuming.
         Clear the cache only if you want to redownload everything from scratch.
       </p>
-      <button class="btn-danger-outline" onclick="if(confirm('Clear all download history?')) { localStorage.clear(); alert('All history cleared.'); }">
+      <button class="btn-danger-outline" onclick="
+        if (confirm('Clear all download history? Your settings will NOT be affected.')) {
+          const keysToRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('CompletedDownloads_')) keysToRemove.push(k);
+          }
+          keysToRemove.forEach(k => localStorage.removeItem(k));
+          alert('Download history cleared (' + keysToRemove.length + ' course(s)).');
+        }
+      ">
         Clear All Download History
       </button>
     </div>

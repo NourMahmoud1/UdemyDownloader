@@ -532,39 +532,107 @@ table.dataTable tbody tr:hover .course-thumbnail {
 
 /* Pagination */
 .dataTables_paginate {
-  padding: 12px 24px 20px !important;
+  padding: 16px 24px 20px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  flex-wrap: wrap;
 }
 
-.dataTables_paginate .paginate_button {
+/* Previous / Next buttons */
+.dataTables_paginate .paginate_button.previous,
+.dataTables_paginate .paginate_button.next {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   border-radius: var(--radius-sm) !important;
   border: 1px solid var(--glass-border) !important;
   background: var(--bg-surface) !important;
   color: var(--text-muted) !important;
-  margin: 0 3px !important;
-  padding: 7px 14px !important;
+  padding: 0 16px !important;
+  height: 34px !important;
   font-size: 12.5px !important;
-  transition: var(--transition);
+  font-family: 'DM Sans', sans-serif !important;
   cursor: pointer;
+  transition: var(--transition);
+  margin: 0 3px !important;
+  box-sizing: border-box !important;
 }
 
-.dataTables_paginate .paginate_button:hover {
+/* The <span> that wraps numbered pages — make it a flex row */
+.dataTables_paginate span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 3px !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 3px !important;
+}
+
+/* Individual numbered page buttons inside the span */
+.dataTables_paginate span .paginate_button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 34px !important;
+  height: 34px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid var(--glass-border) !important;
+  background: var(--bg-surface) !important;
+  color: var(--text-muted) !important;
+  font-size: 12.5px !important;
+  font-family: 'DM Sans', sans-serif !important;
+  cursor: pointer;
+  transition: var(--transition);
+  box-sizing: border-box !important;
+}
+
+/* Ellipsis inside span */
+.dataTables_paginate span .ellipsis {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 34px !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-dim) !important;
+  cursor: default !important;
+  font-size: 13px !important;
+  letter-spacing: 2px;
+  margin: 0 !important;
+}
+
+/* Hover states */
+.dataTables_paginate .paginate_button.previous:hover,
+.dataTables_paginate .paginate_button.next:hover,
+.dataTables_paginate span .paginate_button:hover {
   background: var(--bg-elevated) !important;
   color: var(--text-main) !important;
   border-color: var(--teal) !important;
 }
 
-.dataTables_paginate .paginate_button.current,
-.dataTables_paginate .paginate_button.current:hover {
+/* Active/current page */
+.dataTables_paginate span .paginate_button.current,
+.dataTables_paginate span .paginate_button.current:hover {
   background: var(--brand-gradient) !important;
   color: var(--cream) !important;
   border-color: transparent !important;
   box-shadow: 0 4px 14px rgba(45, 139, 139, 0.4) !important;
+  font-weight: 700 !important;
 }
 
+/* Disabled */
 .dataTables_paginate .paginate_button.disabled,
 .dataTables_paginate .paginate_button.disabled:hover {
-  opacity: 0.3 !important;
+  opacity: 0.35 !important;
   cursor: default !important;
+  pointer-events: none !important;
 }
 
 .dataTables_info {
@@ -574,11 +642,27 @@ table.dataTable tbody tr:hover .course-thumbnail {
   font-weight: 500;
 }
 
-/* Column helpers */
-.td-1 { width: 10%; }
-.td-2 { width: 18%; }
-.td-3 { width: 50%; font-weight: 500 !important; }
-.td-4 { width: 22%; }
+/* Column widths — td-4 flush right, no extra gap */
+.td-1 { width: 5%; text-align: center !important; vertical-align: middle !important; padding: 18px 10px !important; }
+.td-2 { width: 15%; }
+.td-3 { width: 55%; font-weight: 500 !important; }
+.td-4 { width: 25%; padding: 18px 16px 18px 12px !important; }
+
+/* Kill DataTables scrollX right-side phantom column */
+.dataTables_scrollHeadInner,
+.dataTables_scrollBody table {
+  width: 100% !important;
+}
+
+.dataTables_scrollBody {
+  overflow-x: hidden !important;
+}
+
+/* Remove the extra padding DataTables adds at the right of the scroll wrapper */
+.dataTables_wrapper .dataTables_scroll div.dataTables_scrollBody > table > tbody > tr > td:last-child,
+.dataTables_wrapper .dataTables_scroll div.dataTables_scrollBody > table > tbody > tr > th:last-child {
+  padding-right: 16px !important;
+}
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .btn { margin: 0 !important; border: 0; font-family: 'DM Sans', sans-serif; }
@@ -826,31 +910,122 @@ table.dataTable tbody tr:hover .course-thumbnail {
   box-shadow: 0 0 0 4px rgba(45, 139, 139, 0.15) !important;
 }
 
-/* Custom switch */
-.custom-switch .custom-control-label::before {
-  background: var(--bg-elevated);
-  border: 1px solid var(--glass-border);
-  height: 20px; width: 36px;
-  border-radius: var(--radius-full);
+/* Custom switch — rebuilt from scratch, no Bootstrap positioning hacks */
+.custom-control { padding-left: 0 !important; min-height: auto !important; }
+
+.custom-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  position: relative;
 }
 
+.custom-switch .custom-control-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.custom-switch .custom-control-label {
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+
+/* Track */
+.custom-switch .custom-control-label::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 44px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--bg-abyss);
+  border: 2px solid rgba(45, 139, 139, 0.3);
+  transition: background 0.25s var(--ease-out), border-color 0.25s var(--ease-out), box-shadow 0.25s var(--ease-out);
+}
+
+/* Thumb */
+.custom-switch .custom-control-label::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--text-dim);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+  transition: transform 0.25s var(--ease-out), background 0.25s var(--ease-out);
+}
+
+/* Checked state */
 .custom-switch .custom-control-input:checked ~ .custom-control-label::before {
   background: var(--teal);
-  border-color: var(--teal);
-}
-
-.custom-switch .custom-control-label::after {
-  background: white;
-  height: 14px; width: 14px;
-  top: 3px; left: 3px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  border-color: var(--teal-glow);
+  box-shadow: 0 0 10px rgba(45, 139, 139, 0.35);
 }
 
 .custom-switch .custom-control-input:checked ~ .custom-control-label::after {
-  transform: translateX(16px);
+  background: white;
+  transform: translateX(20px);
 }
 
-/* ── Quality / Subtitle selects in table ─────────────────────────────────── */
+/* ── Checkbox (video list rows) ──────────────────────────────────────────── */
+/* DataTables injects an absolutely-positioned div wrapper — override it */
+table.dataTable tbody tr td.td-1 div {
+  position: static !important;
+  height: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+table.dataTable tbody tr td input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px !important;
+  height: 18px !important;
+  border-radius: 5px !important;
+  border: 2px solid rgba(45, 139, 139, 0.5) !important;
+  background: var(--bg-elevated) !important;
+  cursor: pointer;
+  position: relative !important;
+  top: auto !important;
+  display: block !important;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+
+table.dataTable tbody tr td input[type="checkbox"]:checked {
+  background: var(--teal) !important;
+  border-color: var(--teal-glow) !important;
+  box-shadow: 0 0 8px rgba(45, 139, 139, 0.4);
+}
+
+table.dataTable tbody tr td input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 6px;
+  height: 10px;
+  border: 2px solid white;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+table.dataTable tbody tr td input[type="checkbox"]:hover {
+  border-color: var(--teal-glow) !important;
+  box-shadow: 0 0 8px rgba(77, 212, 212, 0.3);
+}
 .quality-select, .subtitle-select {
   background: var(--bg-elevated) !important;
   border: 1px solid var(--glass-border) !important;

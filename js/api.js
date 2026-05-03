@@ -93,7 +93,10 @@ const UdemyAPI = {
 
       if (response.ok) {
         const data = await response.json();
-        UI.updateCounter(counterObj);
+        // Only update the counter when a real counter object was passed
+        if (counterObj && counterObj.Current) {
+          UI.updateCounter(counterObj);
+        }
         return data;
       }
 
