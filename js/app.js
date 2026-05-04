@@ -150,10 +150,31 @@ const App = {
         template,
       });
 
+      // Auto-generate the tracker sheet alongside the bulk download
+      SheetGenerator.generate(App.data, courseDetail, folder);
+
       DownloadManager.startSequential(queue, App.CourseId, () => {
         console.log('[App] Bulk download complete.');
         App._reEnableButtons();
       });
+    });
+
+    // "Download Tracker Sheet" — generate xlsx from current playlist
+    $('#downloadTrackerSheetBtn').on('click', () => {
+      if (!App.data || App.data.length === 0) {
+        UI.showToast('Open a course playlist first.', 'alert-circle');
+        return;
+      }
+      const courseDetail = App.CourseData && App.CourseData.Data && App.CourseData.Data.results
+        ? App.CourseData.Data.results.find((c) => c.id == App.CourseId)
+        : null;
+      if (!courseDetail) {
+        UI.showToast('Course data unavailable. Please re-load the course.', 'alert-circle');
+        return;
+      }
+      $('#bulkDownloadModal').modal('hide');
+      const folder = Storage.getSetting('default_folder');
+      SheetGenerator.generate(App.data, courseDetail, folder);
     });
 
     // "Clear Download Cache" for the current course
