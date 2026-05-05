@@ -47,7 +47,7 @@ const replaceAll = (str, find, replace) =>
  */
 const sanitizeFilename = (str) => {
   if (!str) return 'Unknown';
-  const invalid = ['\\', '/', ':', '*', '?', '"', '<', '>', '|', '.'];
+  const invalid = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
   let result = str;
   invalid.forEach((char) => {
     result = replaceAll(result, char, '');

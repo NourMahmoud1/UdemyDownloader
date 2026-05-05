@@ -44,7 +44,11 @@ const Storage = {
    * @returns {string}
    */
   getSetting(key) {
-    return localStorage.getItem(key) || Storage.DEFAULTS[key] || '';
+    let val = localStorage.getItem(key) || Storage.DEFAULTS[key] || '';
+    if (key === 'default_folder' && val && !val.match(/[\/\\]$/)) {
+      val += '/';
+    }
+    return val;
   },
 
   /**

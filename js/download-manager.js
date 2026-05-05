@@ -82,16 +82,17 @@ const DownloadManager = {
 
       // ── Subtitle ────────────────────────────────────────────────────────
       if (opts.subtitle && opts.subtitle.trim() && video.Captions && video.Captions.length > 0) {
-        const sub = video.Captions.find(
-          (c) => c.locale_id.toLowerCase().includes(opts.subtitle.toLowerCase())
-        ) || video.Captions[0];
+        const query = opts.subtitle.toLowerCase();
+        const sub = video.Captions.find((c) => c.locale_id.toLowerCase() === query) ||
+                    video.Captions.find((c) => c.locale_id.toLowerCase().includes(query)) || 
+                    video.Captions[0];
 
         if (sub) {
           queue.push({
             trid:       video.id + '_sub',
             fileurl:    sub.url,
             foldername: opts.folder,
-            filename:   buildPath(opts.template, video, courseDetail, '.vtt'),
+            filename:   buildPath(opts.template, video, courseDetail, '.' + sub.locale_id + '.vtt'),
           });
         }
       }

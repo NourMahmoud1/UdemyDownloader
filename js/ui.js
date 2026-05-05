@@ -186,9 +186,15 @@ const UI = {
       const selectedUrl  = $row.find('.quality-select').length > 0
         ? $row.find('.quality-select').val()
         : video.VideoUrl;
-      const selectedSub  = $row.find('.subtitle-select').length > 0
+      const selectedSubLocale  = $row.find('.subtitle-select').length > 0
         ? $row.find('.subtitle-select').val()
         : '';
+        
+      let selectedSubUrl = '';
+      if (selectedSubLocale && video.Captions) {
+        const sub = video.Captions.find(c => c.locale_id === selectedSubLocale);
+        if (sub) selectedSubUrl = sub.url;
+      }
 
       const queue = [{
         trid:       rowId,
@@ -197,12 +203,12 @@ const UI = {
         filename:   buildPath(template, video, course, ext),
       }];
 
-      if (selectedSub) {
+      if (selectedSubUrl) {
         queue.push({
           trid:       rowId + '_sub',
-          fileurl:    selectedSub,
+          fileurl:    selectedSubUrl,
           foldername: folder,
-          filename:   buildPath(template, video, course, '.vtt'),
+          filename:   buildPath(template, video, course, '.' + selectedSubLocale + '.vtt'),
         });
       }
 
@@ -377,7 +383,7 @@ const UI = {
               sub += '<option value="">No Subtitle</option>';
               row.Captions.forEach((cap) => {
                 const match    = (userSubtitle.trim() && cap.locale_id.toLowerCase().includes(userSubtitle.toLowerCase())) ? 'selected' : '';
-                sub += '<option value="' + cap.url + '" ' + match + '>' + cap.title + ' (' + cap.locale_id + ')</option>';
+                sub += '<option value="' + cap.locale_id + '" ' + match + '>' + cap.title + ' (' + cap.locale_id + ')</option>';
               });
               sub += '</select></div>';
               result += sub;
@@ -504,7 +510,13 @@ const UI = {
             const ext    = video.Type === 'Article' ? '.html' : '.mp4';
 
             const selectedUrl  = $row.find('.quality-select').length > 0 ? $row.find('.quality-select').val() : video.VideoUrl;
-            const selectedSub  = $row.find('.subtitle-select').length > 0 ? $row.find('.subtitle-select').val() : '';
+            const selectedSubLocale  = $row.find('.subtitle-select').length > 0 ? $row.find('.subtitle-select').val() : '';
+            
+            let selectedSubUrl = '';
+            if (selectedSubLocale && video.Captions) {
+              const sub = video.Captions.find(c => c.locale_id === selectedSubLocale);
+              if (sub) selectedSubUrl = sub.url;
+            }
 
             queue.push({
               trid:       rowId,
@@ -513,12 +525,12 @@ const UI = {
               filename:   buildPath(template, video, course, ext),
             });
 
-            if (selectedSub) {
+            if (selectedSubUrl) {
               queue.push({
                 trid:       rowId + '_sub',
-                fileurl:    selectedSub,
+                fileurl:    selectedSubUrl,
                 foldername: folder,
-                filename:   buildPath(template, video, course, '.vtt'),
+                filename:   buildPath(template, video, course, '.' + selectedSubLocale + '.vtt'),
               });
             }
 
