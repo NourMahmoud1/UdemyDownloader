@@ -215,17 +215,28 @@ const UI = {
       // FIX #9: Include supplementary assets in single download
       if (includeAssets && video.Assets && video.Assets.length > 0) {
         video.Assets.forEach((asset) => {
-          if (asset.download_urls && asset.download_urls.File) {
-            const extMatch     = asset.filename.match(/(\.[^.]+)$/);
-            const aExt         = extMatch ? extMatch[1] : '';
-            const titleWithout = extMatch ? asset.filename.replace(/(\.[^.]+)$/, '') : asset.filename;
-            queue.push({
-              trid:       rowId + '_asset_' + asset.id,
-              fileurl:    asset.download_urls.File[0].file,
-              foldername: folder,
-              filename:   buildPath(template, video, course, aExt, '{video_title} - ' + titleWithout),
-            });
+          let assetUrl = null;
+          const assetFilename = asset.filename || 'resource';
+          if (asset.download_urls) {
+            const urlSources =
+              asset.download_urls.File         ||
+              asset.download_urls.SourceCode   ||
+              asset.download_urls.Presentation ||
+              asset.download_urls.Image        ||
+              (Object.keys(asset.download_urls).length > 0 ? asset.download_urls[Object.keys(asset.download_urls)[0]] : null);
+            if (urlSources && urlSources.length > 0) assetUrl = urlSources[0].file;
           }
+          if (!assetUrl && asset.external_url) assetUrl = asset.external_url;
+          if (!assetUrl) return;
+          const extMatch     = assetFilename.match(/(\.[^.]+)$/);
+          const aExt         = extMatch ? extMatch[1] : '';
+          const titleWithout = extMatch ? assetFilename.replace(/(\.[^.]+)$/, '') : assetFilename;
+          queue.push({
+            trid:       rowId + '_asset_' + asset.id,
+            fileurl:    assetUrl,
+            foldername: folder,
+            filename:   buildPath(template, video, course, aExt, '{video_title} - ' + titleWithout),
+          });
         });
       }
 
@@ -494,8 +505,6 @@ const UI = {
         className: 'btn-sm btn-success btn-width-35 btn-right',
         attr:      { id: 'SelectedVideos', disabled: 'disabled' },
         action() {
-          $('#linkTable').dataTable().fnPageChange(0);
-
           const folder        = Storage.getSetting('default_folder');
           const template      = Storage.getSetting('default_naming_template');
           const includeAssets = Storage.getSetting('default_assets') === 'true';
@@ -503,9 +512,11 @@ const UI = {
           const queue         = [];
 
           rows.find('td').find('input').filter('input:checked').each(function () {
-            const rowId  = $(this).parents('td').parents('tr').attr('id');
-            const $row   = $(this).parents('tr');
+            const $row   = $(this).closest('tr');
+            const rowId  = $row.attr('id');
             const video  = App.data.find((v) => v.id == rowId);
+            if (!video) return; // safeguard
+
             const course = App.CourseData.Data.results.find((c) => c.id == App.CourseId);
             const ext    = video.Type === 'Article' ? '.html' : '.mp4';
 

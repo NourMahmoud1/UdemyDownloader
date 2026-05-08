@@ -100,18 +100,37 @@ const DownloadManager = {
       // ── Supplementary assets ────────────────────────────────────────────
       if (opts.assets && video.Assets && video.Assets.length > 0) {
         video.Assets.forEach((asset) => {
-          if (asset.download_urls && asset.download_urls.File) {
-            const extMatch      = asset.filename.match(/(\.[^.]+)$/);
-            const aExt          = extMatch ? extMatch[1] : '';
-            const titleWithout  = extMatch ? asset.filename.replace(/(\.[^.]+)$/, '') : asset.filename;
+          // Resolve download URL from any recognised key in download_urls
+          let assetUrl = null;
+          const assetFilename = asset.filename || 'resource';
 
-            queue.push({
-              trid:       video.id + '_asset_' + asset.id,
-              fileurl:    asset.download_urls.File[0].file,
-              foldername: opts.folder,
-              filename:   buildPath(opts.template, video, courseDetail, aExt, '{video_title} - ' + titleWithout),
-            });
+          if (asset.download_urls) {
+            const urlSources =
+              asset.download_urls.File         ||
+              asset.download_urls.SourceCode   ||
+              asset.download_urls.Presentation ||
+              asset.download_urls.Image        ||
+              (Object.keys(asset.download_urls).length > 0
+                ? asset.download_urls[Object.keys(asset.download_urls)[0]]
+                : null);
+            if (urlSources && urlSources.length > 0) assetUrl = urlSources[0].file;
           }
+
+          // Fall back to external_url for linked resources
+          if (!assetUrl && asset.external_url) assetUrl = asset.external_url;
+
+          if (!assetUrl) return; // nothing to download
+
+          const extMatch     = assetFilename.match(/(\.[^.]+)$/);
+          const aExt         = extMatch ? extMatch[1] : '';
+          const titleWithout = extMatch ? assetFilename.replace(/(\.[^.]+)$/, '') : assetFilename;
+
+          queue.push({
+            trid:       video.id + '_asset_' + asset.id,
+            fileurl:    assetUrl,
+            foldername: opts.folder,
+            filename:   buildPath(opts.template, video, courseDetail, aExt, '{video_title} - ' + titleWithout),
+          });
         });
       }
     });

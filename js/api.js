@@ -75,42 +75,61 @@ const UdemyAPI = {
    * @returns {Promise<object|null>}
    */
   async request(config, counterObj = '') {
-    try {
-      // Build query string from data object for GET requests
-      let url = config.url;
-      if (config.data && Object.keys(config.data).length > 0) {
-        const params = new URLSearchParams();
-        Object.entries(config.data).forEach(([key, value]) => {
-          params.append(key, value);
-        });
-        url += (url.includes('?') ? '&' : '?') + params.toString();
-      }
+    const MAX_RETRIES  = 3;
+    const RETRY_DELAYS = [2000, 5000, 10000]; // ms between retries on 503/429
 
-      const response = await fetch(url, {
-        method:  config.type || 'GET',
-        headers: UdemyAPI._buildHeaders(),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        // Only update the counter when a real counter object was passed
-        if (counterObj && counterObj.Current) {
-          UI.updateCounter(counterObj);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Build query string from data object for GET requests
+        let url = config.url;
+        if (config.data && Object.keys(config.data).length > 0) {
+          const params = new URLSearchParams();
+          Object.entries(config.data).forEach(([key, value]) => {
+            params.append(key, value);
+          });
+          url += (url.includes('?') ? '&' : '?') + params.toString();
         }
-        return data;
-      }
 
-      if (response.status === 404) {
-        console.warn('[UdemyAPI] 404 – resource not found:', config.url);
-      } else {
-        console.warn('[UdemyAPI] HTTP', response.status, '–', config.url);
-      }
+        const response = await fetch(url, {
+          method:  config.type || 'GET',
+          headers: UdemyAPI._buildHeaders(),
+        });
 
-      return null;
-    } catch (err) {
-      console.error('[UdemyAPI] Network error:', err.message, config.url);
-      return null;
+        if (response.ok) {
+          const data = await response.json();
+          if (counterObj && counterObj.Current) {
+            UI.updateCounter(counterObj);
+          }
+          return data;
+        }
+
+        // Retry on rate-limit / server overload
+        if ((response.status === 429 || response.status === 503) && attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS[attempt];
+          console.warn(`[UdemyAPI] HTTP ${response.status} – retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`, config.url);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        if (response.status === 404) {
+          console.warn('[UdemyAPI] 404 – resource not found:', config.url);
+        } else {
+          console.warn('[UdemyAPI] HTTP', response.status, '–', config.url);
+        }
+
+        return null;
+      } catch (err) {
+        if (attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS[attempt];
+          console.warn(`[UdemyAPI] Network error – retrying in ${delay}ms:`, err.message);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        console.error('[UdemyAPI] Network error:', err.message, config.url);
+        return null;
+      }
     }
+    return null;
   },
 
   // ── High-level fetch methods ───────────────────────────────────────────────
@@ -216,8 +235,8 @@ const UdemyAPI = {
       url:  UdemyAPI.domain + '/api-2.0/users/me/subscribed-courses/' + courseId + '/lectures/' + lectureId,
       type: 'GET',
       data: {
-        'fields[lecture]': 'asset,description,download_url,is_free,last_watched_second',
-        'fields[asset]':   'asset_type,length,stream_urls,captions,thumbnail_sprite,slides,slide_urls,download_urls,image_125_H,body',
+        'fields[lecture]': 'asset,description,download_url,is_free,last_watched_second,supplementary_assets',
+        'fields[asset]':   'asset_type,length,stream_urls,captions,thumbnail_sprite,slides,slide_urls,download_urls,image_125_H,body,filename',
       },
     };
     return UdemyAPI.request(config, counterObj);
@@ -246,7 +265,13 @@ const UdemyAPI = {
       } else if (
         element._class === 'lecture' &&
         element.asset &&
-        (element.asset.asset_type === 'Video' || element.asset.asset_type === 'Article')
+        (
+          element.asset.asset_type === 'Video' ||
+          element.asset.asset_type === 'Article' ||
+          element.asset.asset_type === 'File' ||
+          element.asset.asset_type === 'ExternalLink' ||
+          (element.supplementary_assets && element.supplementary_assets.length > 0)
+        )
       ) {
         element.chapter = currentChapter;
         lectures.push(element);
@@ -278,16 +303,22 @@ const UdemyAPI = {
    * @private
    */
   _normaliseLecture(lecture, details) {
-    const isArticle = details && details.asset && details.asset.asset_type === 'Article';
-    const isValidVideo =
-      details &&
-      details.asset &&
-      details.asset.stream_urls &&
-      details.asset.stream_urls.Video &&
-      details.asset.stream_urls.Video[0];
+    const asset      = details && details.asset ? details.asset : null;
+    const isArticle  = asset && asset.asset_type === 'Article';
+    const isFile     = asset && asset.asset_type === 'File';
+    const isExternal = asset && asset.asset_type === 'ExternalLink';
+
+    // Resolve stream source: prefer stream_urls, fall back to download_urls
+    // (B2B/corporate Udemy accounts often only populate download_urls)
+    const streamVideos =
+      (asset && asset.stream_urls   && Array.isArray(asset.stream_urls.Video)   && asset.stream_urls.Video.length   > 0) ? asset.stream_urls.Video   :
+      (asset && asset.download_urls && Array.isArray(asset.download_urls.Video) && asset.download_urls.Video.length > 0) ? asset.download_urls.Video :
+      null;
+
+    const isValidVideo = !!streamVideos;
 
     if (isArticle) {
-      const html = details.asset.body || lecture.description || '<h1>No Content</h1>';
+      const html = asset.body || lecture.description || '<h1>No Content</h1>';
       const fullHtml =
         '<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n<title>' +
         lecture.title +
@@ -314,7 +345,54 @@ const UdemyAPI = {
     }
 
     if (!isValidVideo) {
+      // ── Resource-only lecture (File, ExternalLink, or supplementary-assets-only) ──
+      if (isFile || isExternal || (lecture.supplementary_assets && lecture.supplementary_assets.length > 0)) {
+        // Build a best-effort primary download URL
+        let primaryUrl = '';
+        if (asset && asset.download_urls) {
+          const urlSources =
+            asset.download_urls.File         ||
+            asset.download_urls.SourceCode   ||
+            asset.download_urls.Presentation ||
+            asset.download_urls.Image        ||
+            (Object.keys(asset.download_urls).length > 0
+              ? asset.download_urls[Object.keys(asset.download_urls)[0]]
+              : null);
+          if (urlSources && urlSources.length > 0) primaryUrl = urlSources[0].file;
+        }
+        if (isExternal && asset && asset.download_urls && asset.download_urls.ExternalLink) {
+          primaryUrl = asset.download_urls.ExternalLink[0].file;
+        }
+
+        const extFromFilename = asset && asset.filename
+          ? (asset.filename.match(/(\.[^.]+)$/) || ['', ''])[1]
+          : '';
+
+        return {
+          id:             lecture.id,
+          VideoUrl:       primaryUrl,
+          VideoTitle:     lecture.object_index + '. ' + lecture.title + " <span class='badge badge-info'>Resource</span>",
+          TitleRaw:       lecture.title,
+          IndexRaw:       lecture.object_index,
+          VideoThumbnail: '',
+          VideoQuality:   isExternal ? 'Link' : (extFromFilename || 'File'),
+          Streams:        [],
+          Captions:       [],
+          Assets:         lecture.supplementary_assets || [],
+          Chapter:        lecture.chapter,
+          Type:           isExternal ? 'ExternalLink' : 'File',
+        };
+      }
+
+      // Log the full asset so we can see what the API returned (DRM, external link, etc.)
       console.warn('[UdemyAPI] Skipping lecture', lecture.id, '– missing stream data');
+      console.debug('[UdemyAPI] Lecture', lecture.id, 'asset dump:', details && details.asset ? JSON.stringify({
+        asset_type:    details.asset.asset_type,
+        stream_urls:   details.asset.stream_urls,
+        download_urls: details.asset.download_urls,
+        is_external:   details.asset.is_external,
+        status:        details.asset.status,
+      }) : 'no details');
       // Increment global error counter (matches original Errors += 1 behavior)
       if (typeof App !== 'undefined') App.errors++;
       return {
@@ -335,14 +413,14 @@ const UdemyAPI = {
 
     return {
       id:             lecture.id,
-      VideoUrl:       details.asset.stream_urls.Video[0].file,
+      VideoUrl:       streamVideos[0].file,
       VideoTitle:     lecture.object_index + '. ' + lecture.title,
       TitleRaw:       lecture.title,
       IndexRaw:       lecture.object_index,
-      VideoThumbnail: details.asset.thumbnail_sprite ? details.asset.thumbnail_sprite.img_url : '',
-      VideoQuality:   details.asset.stream_urls.Video[0].label,
-      Streams:        details.asset.stream_urls.Video.map((s) => ({ label: s.label, file: s.file })),
-      Captions:       details.asset.captions || [],
+      VideoThumbnail: asset.thumbnail_sprite ? asset.thumbnail_sprite.img_url : '',
+      VideoQuality:   streamVideos[0].label || 'Auto',
+      Streams:        streamVideos.map((s) => ({ label: s.label || 'Auto', file: s.file })),
+      Captions:       asset.captions || [],
       Assets:         lecture.supplementary_assets || [],
       Chapter:        lecture.chapter,
       Type:           'Video',
