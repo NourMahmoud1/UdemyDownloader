@@ -18,7 +18,9 @@ const UI = {
     if (!obj || !obj.Current) return;
     $('#current-text').show().text(obj.Current);
     if (obj.Total) {
-      $('#total-text').show().text(' in ' + obj.Total + ' | Errors: ' + (App.errors || 0));
+      const errPart = (App.errors   || 0) > 0 ? ' | Errors: ' + App.errors   : '';
+      const drmPart = (App.drmCount || 0) > 0 ? ' | DRM: '    + App.drmCount : '';
+      $('#total-text').show().text(' in ' + obj.Total + errPart + drmPart);
     }
   },
 
@@ -108,7 +110,9 @@ const UI = {
       buttons:       config.buttons,
       columnDefs:    config.columnDefs,
       language: {
-        info:             'searched : _TOTAL_ | Errors: ' + (App.errors || 0),
+        info:             'searched : _TOTAL_' +
+          ((App.errors   || 0) > 0 ? ' | Errors: ' + App.errors   : '') +
+          ((App.drmCount || 0) > 0 ? ' | DRM: '    + App.drmCount : ''),
         search:           '_INPUT_',
         searchPlaceholder: 'Search by name',
         infoFiltered:     'in _MAX_',
@@ -335,11 +339,17 @@ const UI = {
     App.type = 'Download';
     App.data = videoList;
 
-    // If there were fetch errors, show a prominent toast so the user notices
+    // Show toasts for errors and DRM separately
     if (App.errors > 0) {
       UI.showToast(
         App.errors + ' lecture' + (App.errors === 1 ? '' : 's') + ' failed to load. Re-Analyze to retry.',
         'alert-triangle'
+      );
+    }
+    if ((App.drmCount || 0) > 0) {
+      UI.showToast(
+        App.drmCount + ' DRM-protected lecture' + (App.drmCount === 1 ? '' : 's') + ' — cannot be downloaded.',
+        'lock'
       );
     }
 
@@ -442,6 +452,24 @@ const UI = {
         },
       },
       {
+        text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="eye-off" style="width:14px;height:14px;"></i> <span id="hideDrmText">Hide DRM</span></div>',
+        className: 'btn-sm btn-danger btn-width-25 btn-right',
+        attr:      { id: 'HideDrmBtn' },
+        action() {
+          const $btn     = $('#HideDrmBtn');
+          const isHiding = $btn.data('hiding') !== true;
+          $btn.data('hiding', isHiding);
+          $('#hideDrmText').text(isHiding ? 'Show DRM' : 'Hide DRM');
+          if (isHiding) {
+            $.fn.dataTable.ext.search.push(UI._drmFilter);
+          } else {
+            const idx = $.fn.dataTable.ext.search.indexOf(UI._drmFilter);
+            if (idx > -1) $.fn.dataTable.ext.search.splice(idx, 1);
+          }
+          $('#linkTable').DataTable().draw();
+        },
+      },
+      {
         text:      '<div class="d-flex align-items-center gap-2"><i data-lucide="check-square" style="width:14px;height:14px;"></i> <span id="selectAllText">Select All</span></div>',
         className: 'btn-sm btn-danger btn-width-25 btn-right',
         attr:      { id: 'SelectAll' },
@@ -515,14 +543,14 @@ const UI = {
             const $row   = $(this).closest('tr');
             const rowId  = $row.attr('id');
             const video  = App.data.find((v) => v.id == rowId);
-            if (!video) return; // safeguard
+            if (!video) return;
 
             const course = App.CourseData.Data.results.find((c) => c.id == App.CourseId);
             const ext    = video.Type === 'Article' ? '.html' : '.mp4';
 
-            const selectedUrl  = $row.find('.quality-select').length > 0 ? $row.find('.quality-select').val() : video.VideoUrl;
+            const selectedUrl        = $row.find('.quality-select').length > 0 ? $row.find('.quality-select').val() : video.VideoUrl;
             const selectedSubLocale  = $row.find('.subtitle-select').length > 0 ? $row.find('.subtitle-select').val() : '';
-            
+
             let selectedSubUrl = '';
             if (selectedSubLocale && video.Captions) {
               const sub = video.Captions.find(c => c.locale_id === selectedSubLocale);
@@ -545,7 +573,6 @@ const UI = {
               });
             }
 
-            // FIX #9: Include supplementary assets in selected download
             if (includeAssets && video.Assets && video.Assets.length > 0) {
               video.Assets.forEach((asset) => {
                 if (asset.download_urls && asset.download_urls.File) {
@@ -569,6 +596,17 @@ const UI = {
         },
       },
     ];
+  },
+
+  /**
+   * DataTables custom search filter that hides DRM-protected rows.
+   * Registered/unregistered by the Hide DRM toggle button.
+   * @private
+   */
+  _drmFilter(settings, data, dataIndex) {
+    const video = App.data && App.data[dataIndex];
+    if (video && video._drm === true) return false;
+    return true;
   },
 
   /** @private */

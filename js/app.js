@@ -23,6 +23,9 @@ const App = {
   /** Number of API errors encountered during the last playlist fetch */
   errors: 0,
 
+  /** Number of DRM-protected lectures encountered during the last playlist fetch */
+  drmCount: 0,
+
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
   /**
@@ -232,8 +235,9 @@ const App = {
    * @param {string|number} courseId
    */
   async loadPlaylist(courseId) {
-    App.CourseId = courseId;
-    App.errors   = 0;
+    App.CourseId  = courseId;
+    App.errors    = 0;
+    App.drmCount  = 0;
 
     UI.showSkeleton(8);
     $('#counter').show();

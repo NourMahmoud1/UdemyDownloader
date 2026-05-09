@@ -224,6 +224,9 @@ const UdemyAPI = {
 
   /**
    * Fetches the stream/caption/asset details for a single lecture.
+   * If the primary endpoint returns no stream/download URLs, falls back to
+   * the media-license endpoint which resolves signed stream URLs for older
+   * or restructured course content.
    *
    * @param {string|number} courseId
    * @param {string|number} lectureId
@@ -236,7 +239,7 @@ const UdemyAPI = {
       type: 'GET',
       data: {
         'fields[lecture]': 'asset,description,download_url,is_free,last_watched_second,supplementary_assets',
-        'fields[asset]':   'asset_type,length,stream_urls,captions,thumbnail_sprite,slides,slide_urls,download_urls,image_125_H,body,filename',
+        'fields[asset]':   'asset_type,length,stream_urls,captions,thumbnail_sprite,slides,slide_urls,download_urls,media_license_token,course_is_drmed,media_sources,external_url,image_125_H,body,filename',
       },
     };
     return UdemyAPI.request(config, counterObj);
@@ -307,6 +310,10 @@ const UdemyAPI = {
     const isArticle  = asset && asset.asset_type === 'Article';
     const isFile     = asset && asset.asset_type === 'File';
     const isExternal = asset && asset.asset_type === 'ExternalLink';
+
+    // Detect DRM-protected content — these have media_sources (DASH/HLS encrypted)
+    // but no plain stream_urls. They cannot be downloaded as MP4.
+    const isDRM = !!(asset && asset.course_is_drmed);
 
     // Resolve stream source: prefer stream_urls, fall back to download_urls
     // (B2B/corporate Udemy accounts often only populate download_urls)
@@ -385,29 +392,43 @@ const UdemyAPI = {
       }
 
       // Log the full asset so we can see what the API returned (DRM, external link, etc.)
-      console.warn('[UdemyAPI] Skipping lecture', lecture.id, '– missing stream data');
-      console.debug('[UdemyAPI] Lecture', lecture.id, 'asset dump:', details && details.asset ? JSON.stringify({
-        asset_type:    details.asset.asset_type,
-        stream_urls:   details.asset.stream_urls,
-        download_urls: details.asset.download_urls,
-        is_external:   details.asset.is_external,
-        status:        details.asset.status,
-      }) : 'no details');
-      // Increment global error counter (matches original Errors += 1 behavior)
-      if (typeof App !== 'undefined') App.errors++;
+      if (isDRM) {
+        console.info('[UdemyAPI] Lecture', lecture.id, 'is DRM-protected — cannot download as MP4');
+      } else {
+        console.warn('[UdemyAPI] Skipping lecture', lecture.id, '– missing stream data');
+        console.debug('[UdemyAPI] Lecture', lecture.id, 'asset dump:', details && details.asset ? JSON.stringify({
+          asset_type:    details.asset.asset_type,
+          stream_urls:   details.asset.stream_urls,
+          download_urls: details.asset.download_urls,
+          is_external:   details.asset.is_external,
+          status:        details.asset.status,
+        }) : 'no details');
+      }
+      // Increment appropriate counter
+      if (typeof App !== 'undefined') {
+        if (isDRM) {
+          App.drmCount = (App.drmCount || 0) + 1;
+        } else {
+          App.errors++;
+        }
+      }
       return {
         id:             lecture.id,
         VideoUrl:       '',
-        VideoTitle:     lecture.object_index + '. ' + lecture.title + " <div class='btn-danger'>ERROR</div>",
+        VideoTitle:     lecture.object_index + '. ' + lecture.title +
+          (isDRM
+            ? " <div class='badge badge-warning' style='font-size:11px;padding:3px 7px;'>DRM</div>"
+            : " <div class='btn-danger'>ERROR</div>"),
         TitleRaw:       lecture.title,
         IndexRaw:       lecture.object_index,
         VideoThumbnail: (details && details.asset && details.asset.thumbnail_sprite)
           ? details.asset.thumbnail_sprite.img_url
           : '',
-        VideoQuality:   'Auto',
+        VideoQuality:   isDRM ? 'DRM' : 'Auto',
         Chapter:        lecture.chapter,
         Type:           'Video',
         _error:         true,
+        _drm:           isDRM,
       };
     }
 
