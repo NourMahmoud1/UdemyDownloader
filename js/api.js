@@ -311,6 +311,15 @@ const UdemyAPI = {
     const isFile     = asset && asset.asset_type === 'File';
     const isExternal = asset && asset.asset_type === 'ExternalLink';
 
+    // Sanitize lecture.title for use inside HTML strings (VideoTitle is rendered
+    // as raw HTML by DataTables). Leaves TitleRaw untouched for file-naming.
+    const safeTitle = (lecture.title || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
     // Detect DRM-protected content — these have media_sources (DASH/HLS encrypted)
     // but no plain stream_urls. They cannot be downloaded as MP4.
     const isDRM = !!(asset && asset.course_is_drmed);
@@ -332,13 +341,21 @@ const UdemyAPI = {
         '</title>\n<style>\nbody { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }\nimg { max-width: 100%; height: auto; }\n</style>\n</head>\n<body>\n' +
         html +
         '\n</body>\n</html>';
-      const b64     = btoa(unescape(encodeURIComponent(fullHtml)));
+      // Encode the full HTML as base64 using TextEncoder so that non-latin
+      // characters (e.g. Arabic, CJK) are handled correctly.
+      // The deprecated unescape(encodeURIComponent()) trick is avoided because
+      // unescape() has been removed from strict-mode environments in V8.
+      const b64 = btoa(
+        Array.from(new TextEncoder().encode(fullHtml))
+          .map((b) => String.fromCharCode(b))
+          .join('')
+      );
       const dataUri = 'data:text/html;base64,' + b64;
 
       return {
         id:             lecture.id,
         VideoUrl:       dataUri,
-        VideoTitle:     lecture.object_index + '. ' + lecture.title + " <span class='badge badge-secondary'>Article</span>",
+        VideoTitle:     lecture.object_index + '. ' + safeTitle + " <span class='badge badge-secondary'>Article</span>",
         TitleRaw:       lecture.title,
         IndexRaw:       lecture.object_index,
         VideoThumbnail: '',
@@ -378,7 +395,7 @@ const UdemyAPI = {
         return {
           id:             lecture.id,
           VideoUrl:       primaryUrl,
-          VideoTitle:     lecture.object_index + '. ' + lecture.title + " <span class='badge badge-info'>Resource</span>",
+          VideoTitle:     lecture.object_index + '. ' + safeTitle + " <span class='badge badge-info'>Resource</span>",
           TitleRaw:       lecture.title,
           IndexRaw:       lecture.object_index,
           VideoThumbnail: '',
@@ -415,7 +432,7 @@ const UdemyAPI = {
       return {
         id:             lecture.id,
         VideoUrl:       '',
-        VideoTitle:     lecture.object_index + '. ' + lecture.title +
+        VideoTitle:     lecture.object_index + '. ' + safeTitle +
           (isDRM
             ? " <div class='badge badge-warning' style='font-size:11px;padding:3px 7px;'>DRM</div>"
             : " <div class='btn-danger'>ERROR</div>"),
@@ -435,7 +452,7 @@ const UdemyAPI = {
     return {
       id:             lecture.id,
       VideoUrl:       streamVideos[0].file,
-      VideoTitle:     lecture.object_index + '. ' + lecture.title,
+      VideoTitle:     lecture.object_index + '. ' + safeTitle,
       TitleRaw:       lecture.title,
       IndexRaw:       lecture.object_index,
       VideoThumbnail: asset.thumbnail_sprite ? asset.thumbnail_sprite.img_url : '',

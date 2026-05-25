@@ -45,8 +45,16 @@ const Storage = {
    */
   getSetting(key) {
     let val = localStorage.getItem(key) || Storage.DEFAULTS[key] || '';
-    if (key === 'default_folder' && val && !val.match(/[\/\\]$/)) {
-      val += '/';
+    if (key === 'default_folder' && val) {
+      // Strip absolute path prefixes (e.g. "F:/" or "C:\") so the value is
+      // always relative — chrome.downloads.download rejects absolute paths.
+      val = val
+        .replace(/^[A-Za-z]:[\\\/ ]+/, '')  // remove Windows drive letter
+        .replace(/^[\\\/]+/, '');            // remove any leading slashes
+      if (val && !val.match(/[\/\\]$/)) {
+        val += '/';
+      }
+      if (!val) val = Storage.DEFAULTS[key];
     }
     return val;
   },

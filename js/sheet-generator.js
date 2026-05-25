@@ -1,9 +1,14 @@
 /**
- * sheet-generator.js
- * Generates a styled .xlsx course-tracker workbook and triggers a download.
+ * sheet-generator.js  (v2)
+ * Generates a polished .xlsx course-tracker workbook and triggers a download.
  *
- * The sheet is built entirely in the browser using the SheetJS (xlsx) library
- * loaded from the Plugins folder, so no Python / native code is required.
+ * Design highlights:
+ *   - 8-column layout: # | Title | Type | Duration | Size | Status | Rating | Notes
+ *   - Named style factories -- no inline duplication
+ *   - Frozen header row (row 9) + first two columns
+ *   - % Complete formula (auto-updates in Excel as you tick rows)
+ *   - Bold totals row at the bottom
+ *   - Data validations for Status and Rating columns
  *
  * Public API:
  *   SheetGenerator.generate(videos, courseDetail, folder)
@@ -13,7 +18,7 @@
 
 const SheetGenerator = {
 
-  // ── Palette (Ocean Depths — matches the extension UI) ───────────────────
+  // -- Palette (Ocean Depths -- matches the extension UI) --------------------
   _C: {
     NAVY:        '0D1B2A',
     OCEAN:       '1A2E45',
@@ -25,15 +30,21 @@ const SheetGenerator = {
     DIM:         '4A7A94',
     CHAPTER_BG:  '0D3D56',
     HEADER_BG:   '1E3A55',
-    NOTES_BG:    'FFFDE7',
-    ROW_ALT:     'F4F9F9',
+    NOTES_BG:    'FFF8E1',
+    ROW_EVEN:    'F0F7F7',
+    ROW_ODD:     'FFFFFF',
     BORDER:      'BBCCCC',
-    WHITE:       'FFFFFF',
+    BORDER_DARK: '2D8B8B',
+    GREEN:       '22C55E',
+    AMBER:       'F59E0B',
+    RED:         'EF4444',
+    TOTAL_BG:    '0D2E42',
   },
 
-  // ── Duration formatter ───────────────────────────────────────────────────
+  // -- Helpers ---------------------------------------------------------------
+
   _fmtDuration(secs) {
-    if (!secs) return '—';
+    if (!secs) return '--';
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
     const s = Math.floor(secs % 60);
@@ -41,178 +52,206 @@ const SheetGenerator = {
     return `${m}m ${String(s).padStart(2, '0')}s`;
   },
 
-  // ── Today's date as "DD Month YYYY" ─────────────────────────────────────
   _today() {
     return new Date().toLocaleDateString('en-GB', {
       day: '2-digit', month: 'long', year: 'numeric',
     });
   },
 
-  // ── Cell style builders ──────────────────────────────────────────────────
-  _style(fg, fontColor, bold = false, sz = 10, italic = false, halign = 'left', valign = 'center', wrapText = false) {
+  /** Column letter from 0-based index */
+  _col(i) { return String.fromCharCode(65 + i); },
+
+  /** Build a full cell address */
+  _addr(col, row) {
+    return (typeof col === 'number' ? this._col(col) : col) + row;
+  },
+
+  // -- Style factories -------------------------------------------------------
+
+  _border(color, style = 'thin') {
+    const s = { style, color: { rgb: color } };
+    return { top: s, bottom: s, left: s, right: s };
+  },
+
+  _cell(fg, fc, opts = {}) {
+    const {
+      bold = false, sz = 10, italic = false,
+      halign = 'left', valign = 'center',
+      wrap = false, borderColor = this._C.BORDER,
+      borderStyle = 'thin',
+    } = opts;
     return {
-      font:      { name: 'Calibri', sz, bold, italic, color: { rgb: fontColor } },
+      font:      { name: 'Calibri', sz, bold, italic, color: { rgb: fc } },
       fill:      { patternType: 'solid', fgColor: { rgb: fg } },
-      alignment: { horizontal: halign, vertical: valign, wrapText },
-      border: {
-        top:    { style: 'thin', color: { rgb: this._C.BORDER } },
-        bottom: { style: 'thin', color: { rgb: this._C.BORDER } },
-        left:   { style: 'thin', color: { rgb: this._C.BORDER } },
-        right:  { style: 'thin', color: { rgb: this._C.BORDER } },
-      },
+      alignment: { horizontal: halign, vertical: valign, wrapText: wrap },
+      border:    this._border(borderColor, borderStyle),
     };
   },
 
-  _bannerStyle(fg, fontColor, sz = 14, bold = true) {
+  _bannerCell(fg, fc, sz = 14, bold = true, italic = false) {
     return {
-      font:      { name: 'Calibri', sz, bold, color: { rgb: fontColor } },
+      font:      { name: 'Calibri', sz, bold, italic, color: { rgb: fc } },
       fill:      { patternType: 'solid', fgColor: { rgb: fg } },
       alignment: { horizontal: 'left', vertical: 'center', indent: 1 },
     };
   },
 
-  _chapterStyle() {
+  _headerCell() {
+    return this._cell(this._C.HEADER_BG, this._C.CREAM, {
+      bold: true, sz: 10, halign: 'center',
+      borderColor: this._C.TEAL, borderStyle: 'medium',
+    });
+  },
+
+  _chapterCell() {
     return {
-      font:      { name: 'Calibri', sz: 10, bold: true, color: { rgb: this._C.SEAFOAM } },
+      font:      { name: 'Calibri', sz: 10, bold: true, italic: true, color: { rgb: this._C.SEAFOAM } },
       fill:      { patternType: 'solid', fgColor: { rgb: this._C.CHAPTER_BG } },
       alignment: { horizontal: 'left', vertical: 'center', indent: 1 },
-      border: {
-        top:    { style: 'thin', color: { rgb: this._C.TEAL_LIGHT } },
-        bottom: { style: 'thin', color: { rgb: this._C.TEAL_LIGHT } },
-        left:   { style: 'thin', color: { rgb: this._C.TEAL_LIGHT } },
-        right:  { style: 'thin', color: { rgb: this._C.TEAL_LIGHT } },
-      },
+      border:    this._border(this._C.TEAL_LIGHT),
     };
   },
 
-  _headerStyle() {
-    return {
-      font:      { name: 'Calibri', sz: 10, bold: true, color: { rgb: this._C.CREAM } },
-      fill:      { patternType: 'solid', fgColor: { rgb: this._C.HEADER_BG } },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border: {
-        top:    { style: 'medium', color: { rgb: this._C.TEAL } },
-        bottom: { style: 'medium', color: { rgb: this._C.TEAL } },
-        left:   { style: 'thin',   color: { rgb: this._C.TEAL } },
-        right:  { style: 'thin',   color: { rgb: this._C.TEAL } },
-      },
+  _totalCell(fc, halign = 'center') {
+    return this._cell(this._C.TOTAL_BG, fc, {
+      bold: true, sz: 10, halign,
+      borderColor: this._C.TEAL, borderStyle: 'medium',
+    });
+  },
+
+  // -- Cell writer -----------------------------------------------------------
+
+  _set(ws, addr, value, style, isFormula = false) {
+    ws[addr] = {
+      v: value,
+      t: isFormula ? 'n' : (typeof value === 'number' ? 'n' : 's'),
+      s: style,
     };
+    if (isFormula) {
+      ws[addr].f = value;
+      ws[addr].v = undefined;
+    }
   },
 
-  // ── SheetJS helper: set a cell with value + style ────────────────────────
-  _setCell(ws, addr, value, style) {
-    if (!ws[addr]) ws[addr] = {};
-    ws[addr].v = value;
-    ws[addr].t = typeof value === 'number' ? 'n' : 's';
-    ws[addr].s = style;
+  /** Fill every cell in a row with the same style */
+  _fillRow(ws, row, cols, style, value = '') {
+    for (let c = 0; c < cols; c++) {
+      this._set(ws, this._addr(c, row), value, style);
+    }
   },
 
-  // ── Main entry point ─────────────────────────────────────────────────────
+  // -- Main entry point ------------------------------------------------------
 
   /**
    * Builds and downloads the course-tracker .xlsx file.
    *
+   * Column layout (8 cols, A-H):
+   *   A  #       B  Lecture Title   C  Type    D  Duration
+   *   E  Size    F  Status          G  Rating  H  Notes
+   *
    * @param {Array}  videos        - Normalised video list from App.data
-   * @param {object} courseDetail  - Course API object (title, visible_instructors)
-   * @param {string} folder        - Base download folder (for the filename hint)
+   * @param {object} courseDetail  - Course API object
+   * @param {string} folder        - Base download folder (for filename hint)
    */
   generate(videos, courseDetail, folder) {
     if (typeof XLSX === 'undefined') {
       console.error('[SheetGenerator] SheetJS (XLSX) is not loaded.');
-      UI.showToast('Could not generate tracker — SheetJS missing.', 'alert-circle');
+      if (typeof UI !== 'undefined') UI.showToast('Could not generate tracker -- SheetJS missing.', 'alert-circle');
       return;
     }
 
-    const C = this._C;
+    const C    = this._C;
+    const COLS = 8;
 
-    // ── Metadata ────────────────────────────────────────────────────────────
-    const courseTitle  = courseDetail.title || 'Unknown Course';
-    const instructor   = courseDetail.visible_instructors && courseDetail.visible_instructors.length > 0
+    // -- Metadata -------------------------------------------------------------
+    const courseTitle = courseDetail.title || 'Unknown Course';
+    const instructor  = courseDetail.visible_instructors && courseDetail.visible_instructors.length > 0
       ? courseDetail.visible_instructors[0].display_name
       : 'Unknown Instructor';
 
     const totalLectures = videos.length;
     const totalSecs     = videos.reduce((sum, v) => sum + (v.duration || 0), 0);
 
-    // ── Build worksheet manually ────────────────────────────────────────────
-    const ws  = {};
-    const ref = { minR: 1, minC: 1, maxR: 1, maxC: 7 };
+    // -- Build worksheet object -----------------------------------------------
+    const ws          = {};
+    const merges      = [];
+    const validations = [];
 
-    // Column widths (in SheetJS character units)
+    // Column widths (chars)
     ws['!cols'] = [
-      { wch: 5  },   // A  #
-      { wch: 52 },   // B  Title
-      { wch: 10 },   // C  Type
-      { wch: 11 },   // D  Duration
-      { wch: 16 },   // E  Watched
-      { wch: 10 },   // F  Rating
-      { wch: 38 },   // G  Notes
+      { wch:  5 },  // A  #
+      { wch: 50 },  // B  Lecture Title
+      { wch: 10 },  // C  Type
+      { wch: 11 },  // D  Duration
+      { wch: 12 },  // E  Size
+      { wch: 16 },  // F  Status
+      { wch: 10 },  // G  Rating
+      { wch: 38 },  // H  Notes
     ];
 
     let row = 1;
 
-    // ── ROW 1: Course banner ────────────────────────────────────────────────
-    this._setCell(ws, `A${row}`, `  ${courseTitle}`, this._bannerStyle(C.NAVY, C.CREAM, 14, true));
-    ws['!merges'] = ws['!merges'] || [];
-    ws['!merges'].push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: 6 } });
-    ws[`A${row}`].h = 36; // row height hint (not all renderers honour this)
+    // ROW 1: Course banner
+    this._fillRow(ws, row, COLS, this._bannerCell(C.NAVY, C.CREAM, 14, true));
+    this._set(ws, 'A' + row, '  ' + courseTitle, this._bannerCell(C.NAVY, C.CREAM, 14, true));
+    merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ── ROW 2: Sub-header ───────────────────────────────────────────────────
-    this._setCell(ws, `A${row}`,
-      `  Instructor: ${instructor}     |     Generated: ${this._today()}`,
-      this._bannerStyle(C.NAVY, C.SEAFOAM, 10, false));
-    // apply italic
-    ws[`A${row}`].s.font.italic = true;
-    ws['!merges'].push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: 6 } });
+    // ROW 2: Sub-header
+    this._fillRow(ws, row, COLS, this._bannerCell(C.NAVY, C.SEAFOAM, 10, false, true));
+    this._set(ws, 'A' + row,
+      '  Instructor: ' + instructor + '     |     Generated: ' + this._today(),
+      this._bannerCell(C.NAVY, C.SEAFOAM, 10, false, true));
+    merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ── ROW 3: Spacer ───────────────────────────────────────────────────────
-    this._setCell(ws, `A${row}`, '', { fill: { patternType: 'solid', fgColor: { rgb: C.NAVY } } });
-    ws['!merges'].push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: 6 } });
+    // ROW 3: Spacer
+    this._fillRow(ws, row, COLS, { fill: { patternType: 'solid', fgColor: { rgb: C.NAVY } } });
+    merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ── ROWS 4-6: Summary block ─────────────────────────────────────────────
-    const summaryItems = [
-      ['Total Lectures',  String(totalLectures)],
-      ['Total Duration',  this._fmtDuration(totalSecs)],
-      ['Completed',       '0  —  update as you watch'],
+    // ROWS 4-7: Summary block
+    const lblSt = this._cell(C.OCEAN, C.SEAFOAM, { bold: true });
+    const valSt = this._cell(C.OCEAN, C.CREAM);
+
+    const summaryRows = [
+      ['Total Lectures', String(totalLectures)],
+      ['Total Duration', this._fmtDuration(totalSecs)],
+      ['Completed',      '0  --  update as you watch'],
+      ['% Complete',     ''],  // will hold live formula
     ];
 
-    const labelSt = this._style(C.OCEAN, C.SEAFOAM, true,  10, false, 'left');
-    const valSt   = this._style(C.OCEAN, C.CREAM,   false, 10, false, 'left');
-
-    summaryItems.forEach(([label, val]) => {
-      this._setCell(ws, `A${row}`, label, labelSt);
-      this._setCell(ws, `B${row}`, '',    labelSt);
-      ws['!merges'].push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: 1 } });
-      this._setCell(ws, `C${row}`, val, valSt);
-      ['D', 'E', 'F', 'G'].forEach(col => {
-        this._setCell(ws, `${col}${row}`, '', valSt);
-      });
-      ws['!merges'].push({ s: { r: row - 1, c: 2 }, e: { r: row - 1, c: 6 } });
-      row++;
+    summaryRows.forEach(([label, val], i) => {
+      const r = row + i;
+      this._set(ws, 'A' + r, label, lblSt);
+      this._set(ws, 'B' + r, '',    lblSt);
+      merges.push({ s: { r: r - 1, c: 0 }, e: { r: r - 1, c: 1 } });
+      for (let c = 2; c < COLS; c++) {
+        this._set(ws, this._addr(c, r), c === 2 ? val : '', valSt);
+      }
+      merges.push({ s: { r: r - 1, c: 2 }, e: { r: r - 1, c: COLS - 1 } });
     });
 
-    // ── ROW 7: Spacer ───────────────────────────────────────────────────────
-    this._setCell(ws, `A${row}`, '', { fill: { patternType: 'solid', fgColor: { rgb: C.NAVY } } });
-    ws['!merges'].push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: 6 } });
+    const pctRow = row + 3;
+    row += 4;
+
+    // ROW 8: Spacer
+    this._fillRow(ws, row, COLS, { fill: { patternType: 'solid', fgColor: { rgb: C.NAVY } } });
+    merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ── ROW 8: Column headers ───────────────────────────────────────────────
+    // ROW 9: Column headers
     const HEADER_ROW = row;
-    const headers = ['#', 'Lecture Title', 'Type', 'Duration', 'Watched', 'Rating', 'Notes'];
-    const hSt = this._headerStyle();
-    headers.forEach((h, i) => {
-      const addr = `${String.fromCharCode(65 + i)}${row}`;
-      this._setCell(ws, addr, h, hSt);
-    });
+    const HEADERS    = ['#', 'Lecture Title', 'Type', 'Duration', 'Size', 'Status', 'Rating', 'Notes'];
+    const hSt        = this._headerCell();
+    HEADERS.forEach((h, i) => this._set(ws, this._addr(i, row), h, hSt));
     row++;
 
-    // ── Data rows ───────────────────────────────────────────────────────────
+    const DATA_START = row;
+
+    // -- Data rows ------------------------------------------------------------
     let currentChapter = null;
     let lectureNum     = 0;
-    const dataValidations = [];
 
     videos.forEach((video) => {
       const chapter = video.Chapter || '';
@@ -220,103 +259,125 @@ const SheetGenerator = {
       // Chapter divider
       if (chapter && chapter !== currentChapter) {
         currentChapter = chapter;
-        this._setCell(ws, `A${row}`, `  ${chapter}`, this._chapterStyle());
-        ws['!merges'].push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: 6 } });
-        ['B','C','D','E','F','G'].forEach(col => {
-          ws[`${col}${row}`] = { v: '', t: 's', s: this._chapterStyle() };
-        });
+        const chSt = this._chapterCell();
+        this._fillRow(ws, row, COLS, chSt);
+        this._set(ws, 'A' + row, '  >> ' + chapter, chSt);
+        merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
         row++;
       }
 
       lectureNum++;
-      const isAlt     = lectureNum % 2 === 0;
-      const rowBg     = isAlt ? C.ROW_ALT : C.WHITE;
-      const textColor = '222222';
-      const dimColor  = C.DIM;
+      const rowBg   = (lectureNum % 2 === 0) ? C.ROW_EVEN : C.ROW_ODD;
+      const textCol = '1A2E45';
+      const dimCol  = '4A7A94';
+
+      const baseSt   = (ha = 'left') => this._cell(rowBg, textCol, { halign: ha });
+      const centerSt = ()            => this._cell(rowBg, dimCol,  { halign: 'center' });
 
       // A: index
-      this._setCell(ws, `A${row}`, video.IndexRaw || lectureNum,
-        this._style(rowBg, textColor, false, 10, false, 'center'));
+      this._set(ws, 'A' + row, video.IndexRaw || lectureNum,
+        this._cell(rowBg, textCol, { halign: 'center', bold: true }));
 
-      // B: title (strip HTML tags)
-      const cleanTitle = (video.TitleRaw || video.VideoTitle || '')
-        .replace(/<[^>]*>/g, '').trim();
-      this._setCell(ws, `B${row}`, cleanTitle,
-        this._style(rowBg, textColor, false, 10, false, 'left'));
+      // B: title
+      const cleanTitle = (video.TitleRaw || video.VideoTitle || '').replace(/<[^>]*>/g, '').trim();
+      this._set(ws, 'B' + row, cleanTitle, baseSt());
 
       // C: type
-      const typeLabel = video.Type || 'Video';
-      const typeColor = typeLabel === 'Article' ? C.TEAL : textColor;
-      this._setCell(ws, `C${row}`, typeLabel,
-        this._style(rowBg, typeColor, false, 10, false, 'center'));
+      const typeMap = { Video: 'Video', Article: 'Article', File: 'File', ExternalLink: 'Link' };
+      this._set(ws, 'C' + row, typeMap[video.Type] || video.Type || 'Video', centerSt());
 
       // D: duration
-      this._setCell(ws, `D${row}`, this._fmtDuration(video.duration || 0),
-        this._style(rowBg, dimColor, false, 10, false, 'center'));
+      this._set(ws, 'D' + row, this._fmtDuration(video.duration || 0), centerSt());
 
-      // E: Watched dropdown — default "Not Started"
-      this._setCell(ws, `E${row}`, 'Not Started',
-        this._style(rowBg, dimColor, false, 10, true, 'center'));
-      dataValidations.push({
-        type: 'list', sqref: `E${row}`,
-        formula1: '"Not Started,In Progress,Completed"',
+      // E: size (populated from video.filesize if available)
+      const sizeStr = (typeof formatBytes === 'function' && video.filesize)
+        ? formatBytes(video.filesize) : '--';
+      this._set(ws, 'E' + row, sizeStr, centerSt());
+
+      // F: Status dropdown
+      this._set(ws, 'F' + row, 'Not Started',
+        this._cell(rowBg, dimCol, { halign: 'center', italic: true }));
+      validations.push({
+        type: 'list', sqref: 'F' + row,
+        formula1: '"Not Started,In Progress,Completed,Skipped"',
+        showDropDown: false,
       });
 
-      // F: Rating dropdown — blank
-      this._setCell(ws, `F${row}`, '',
-        this._style(rowBg, textColor, false, 10, false, 'center'));
-      dataValidations.push({
-        type: 'list', sqref: `F${row}`,
-        formula1: '"\u2B50,\u2B50\u2B50,\u2B50\u2B50\u2B50,\u2B50\u2B50\u2B50\u2B50,\u2B50\u2B50\u2B50\u2B50\u2B50"',
+      // G: Rating dropdown
+      this._set(ws, 'G' + row, '', centerSt());
+      validations.push({
+        type: 'list', sqref: 'G' + row,
+        formula1: '"\u2B505,\u2B504,\u2B503,\u2B502,\u2B501"',
       });
 
-      // G: Notes
-      this._setCell(ws, `G${row}`, '',
-        this._style(C.NOTES_BG, '555555', false, 10, false, 'left'));
+      // H: Notes
+      this._set(ws, 'H' + row, '',
+        this._cell(C.NOTES_BG, '555555', { halign: 'left', wrap: true }));
 
       row++;
     });
 
-    // ── Set worksheet ref range ─────────────────────────────────────────────
-    ref.maxR = row - 1;
-    ws['!ref'] = `A1:G${ref.maxR}`;
+    const DATA_END = row - 1;
 
-    // ── Row heights via !rows ───────────────────────────────────────────────
-    ws['!rows'] = [];
-    ws['!rows'][0] = { hpt: 36 };  // row 1 banner
-    ws['!rows'][1] = { hpt: 18 };  // row 2 sub-header
-    ws['!rows'][2] = { hpt:  8 };  // row 3 spacer
-    for (let i = 3; i <= 5; i++) ws['!rows'][i] = { hpt: 18 }; // summary
-    ws['!rows'][6] = { hpt:  8 };  // spacer
-    ws['!rows'][7] = { hpt: 22 };  // header
-    // Data rows
-    for (let i = 8; i < row; i++) ws['!rows'][i] = { hpt: 20 };
+    // -- Totals row -----------------------------------------------------------
+    const totSt  = this._totalCell(C.SEAFOAM, 'center');
+    const totLbl = this._totalCell(C.CREAM,   'right');
+    this._set(ws, 'A' + row, 'TOTAL',                      this._totalCell(C.CREAM, 'center'));
+    this._set(ws, 'B' + row, totalLectures + ' lectures',  totLbl);
+    this._set(ws, 'C' + row, '',                           totSt);
+    this._set(ws, 'D' + row, this._fmtDuration(totalSecs), totSt);
+    this._set(ws, 'E' + row, '--',                         totSt);
+    this._set(ws, 'F' + row, '--',                         totSt);
+    this._set(ws, 'G' + row, '--',                         totSt);
+    this._set(ws, 'H' + row, '--',                         totSt);
+    row++;
 
-    // ── Data validations ────────────────────────────────────────────────────
-    ws['!dataValidations'] = dataValidations;
+    // -- Back-fill % Complete formula -----------------------------------------
+    const pctFormula =
+      'COUNTIF(F' + DATA_START + ':F' + DATA_END + ',"Completed")' +
+      '&" / "' +
+      '&' + totalLectures +
+      '&" ("' +
+      '&TEXT(COUNTIF(F' + DATA_START + ':F' + DATA_END + ',"Completed")/' + totalLectures + ',"0%")' +
+      '&")"';
+    ws['C' + pctRow] = { f: pctFormula, v: '0 / ' + totalLectures + ' (0%)', t: 's', s: valSt };
 
-    // ── Assemble workbook ───────────────────────────────────────────────────
+    // -- Worksheet metadata ---------------------------------------------------
+    ws['!ref']             = 'A1:H' + (row - 1);
+    ws['!merges']          = merges;
+    ws['!dataValidations'] = validations;
+    ws['!freeze']          = { xSplit: 2, ySplit: HEADER_ROW, topLeftCell: 'C' + (HEADER_ROW + 1) };
+
+    // -- Row heights ----------------------------------------------------------
+    const rowHeights = [];
+    rowHeights[0] = { hpt: 38 };  // banner
+    rowHeights[1] = { hpt: 18 };  // sub-header
+    rowHeights[2] = { hpt:  6 };  // spacer
+    for (let i = 3; i <= 6; i++) rowHeights[i] = { hpt: 19 };  // summary
+    rowHeights[7] = { hpt:  6 };  // spacer
+    rowHeights[8] = { hpt: 24 };  // column header
+    for (let i = 9; i < row; i++) rowHeights[i] = { hpt: 20 };
+    ws['!rows'] = rowHeights;
+
+    // -- Assemble workbook ----------------------------------------------------
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Course Tracker');
-
-    // ── Workbook properties ─────────────────────────────────────────────────
     wb.Props = {
-      Title:   courseTitle + ' — Course Tracker',
+      Title:   courseTitle + ' -- Course Tracker',
       Subject: 'Udemy Course Progress',
       Author:  'UdemyDownloader Extension',
     };
 
-    // ── Filename ────────────────────────────────────────────────────────────
+    // -- Filename & download --------------------------------------------------
     const safeName = courseTitle.replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 60);
-    const filename = `${safeName} — Course Tracker.xlsx`;
+    const filename = safeName + ' -- Course Tracker.xlsx';
 
-    // ── Trigger browser download ────────────────────────────────────────────
     try {
       XLSX.writeFile(wb, filename, { bookType: 'xlsx', bookSST: false, type: 'binary', cellStyles: true });
-      UI.showToast('Course tracker spreadsheet downloaded!', 'table');
+      if (typeof UI !== 'undefined') UI.showToast('Course tracker spreadsheet downloaded!', 'table');
     } catch (err) {
       console.error('[SheetGenerator] Failed to write xlsx:', err);
-      UI.showToast('Spreadsheet generation failed.', 'alert-circle');
+      if (typeof UI !== 'undefined') UI.showToast('Spreadsheet generation failed.', 'alert-circle');
     }
   },
 };

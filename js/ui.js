@@ -131,12 +131,21 @@ const UI = {
         const rows      = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
         const checkboxes = rows.find('td').find('input');
 
-        // Add hidden progress bars to the action column
+        // Add progress bars and dl-stats widgets to the action column
         rows.find('td').filter('[class*="td-4"]')
-          .append("<div class='progress' style='margin-top:3px; height:1.2rem;'>" +
-                  "<div class='progress-bar' role='progressbar' style='width: 0%; background-color:var(--secondary)!important' " +
-                  "aria-valuenow='50' aria-valuemin='0' aria-valuemax='100'>0%</div></div>");
-        rows.find('td').filter('[class*="td-4"]').find('[class*="progress"]').hide();
+          .append(
+            "<div class='dl-progress' style='display:none; margin-top:5px;'>" +
+            "<div class='dl-progress-bar' role='progressbar' aria-valuenow='0' aria-valuemin='0' aria-valuemax='100'></div>" +
+            "</div>" +
+            "<div class='dl-stats' style='display:none;'>" +
+            "<span class='dl-size'></span>" +
+            "<span class='dl-sep'> · </span>" +
+            "<span class='dl-speed'></span>" +
+            "<span class='dl-sep'> · </span>" +
+            "<span class='dl-eta'></span>" +
+            "</div>"
+          );
+        rows.find('td').filter('[class*="td-4"]').find('.dl-progress').hide();
 
         // Checkbox change handler
         checkboxes.on('change', (e) => {
@@ -575,17 +584,34 @@ const UI = {
 
             if (includeAssets && video.Assets && video.Assets.length > 0) {
               video.Assets.forEach((asset) => {
-                if (asset.download_urls && asset.download_urls.File) {
-                  const extMatch     = asset.filename.match(/(\.[^.]+)$/);
-                  const aExt         = extMatch ? extMatch[1] : '';
-                  const titleWithout = extMatch ? asset.filename.replace(/(\.[^.]+)$/, '') : asset.filename;
-                  queue.push({
-                    trid:       rowId + '_asset_' + asset.id,
-                    fileurl:    asset.download_urls.File[0].file,
-                    foldername: folder,
-                    filename:   buildPath(template, video, course, aExt, '{video_title} - ' + titleWithout),
-                  });
+                // Guard: resolve URL the same way the single-download and buildQueue paths do,
+                // using asset.filename || 'resource' to prevent a crash when filename is absent.
+                let assetUrl = null;
+                const assetFilename = asset.filename || 'resource';
+
+                if (asset.download_urls) {
+                  const urlSources =
+                    asset.download_urls.File         ||
+                    asset.download_urls.SourceCode   ||
+                    asset.download_urls.Presentation ||
+                    asset.download_urls.Image        ||
+                    (Object.keys(asset.download_urls).length > 0
+                      ? asset.download_urls[Object.keys(asset.download_urls)[0]]
+                      : null);
+                  if (urlSources && urlSources.length > 0) assetUrl = urlSources[0].file;
                 }
+                if (!assetUrl && asset.external_url) assetUrl = asset.external_url;
+                if (!assetUrl) return;
+
+                const extMatch     = assetFilename.match(/(\.[^.]+)$/);
+                const aExt         = extMatch ? extMatch[1] : '';
+                const titleWithout = extMatch ? assetFilename.replace(/(\.[^.]+)$/, '') : assetFilename;
+                queue.push({
+                  trid:       rowId + '_asset_' + asset.id,
+                  fileurl:    assetUrl,
+                  foldername: folder,
+                  filename:   buildPath(template, video, course, aExt, '{video_title} - ' + titleWithout),
+                });
               });
             }
           });

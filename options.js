@@ -28,11 +28,18 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
 
         let folderPath = defaultFolderInput.value.trim();
-        // ensure suffix integrity
+
+        // chrome.downloads only allows paths relative to the system Downloads folder.
+        // Strip any Windows absolute prefix (e.g. "F:/" or "C:\") silently.
+        folderPath = folderPath
+            .replace(/^[A-Za-z]:[\\\/]+/, '')  // remove drive letter
+            .replace(/^[\\\/]+/, '');            // remove leading slashes
+
+        // ensure trailing slash
         if (folderPath && !folderPath.endsWith('/')) {
             folderPath += '/';
-            defaultFolderInput.value = folderPath;
         }
+        defaultFolderInput.value = folderPath;
 
         // Save new settings
         localStorage.setItem('default_folder', folderPath || "Udemy Download/");

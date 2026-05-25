@@ -21,12 +21,16 @@ const DownloadManager = {
 
   /** State shared with the progress poller */
   _poll: {
-    downId:       null,
-    tid:          -1,
-    progressBar:  null,
+    downId:        null,
+    tid:           -1,
+    progressBar:   null,
     videoRowIndex: null,
-    currentPage:  null,
-    MS:           500,
+    currentPage:   null,
+    MS:            500,
+    lastBytes:     0,
+    lastTime:      0,
+    speedSamples:  [],
+    MAX_SAMPLES:   6,
   },
 
   /** Overall queue progress state */
@@ -40,6 +44,7 @@ const DownloadManager = {
     trid:        null,
     progressDiv: null,
     progressBar: null,
+    dlStats:     null,
     downloadBtn: null,
     row:         null,
   },
@@ -285,13 +290,21 @@ const DownloadManager = {
 
       console.log('[DownloadManager] Downloading:', fullPath);
 
+      // chrome.downloads.download only accepts paths relative to the Downloads
+      // folder. Strip any Windows absolute prefix (e.g. "F:/", "F:\") and
+      // normalise backslashes to forward slashes.
+      const safeFilename = fullPath
+        .replace(/^[A-Za-z]:[\\\/]+/, '')  // remove drive letter: "F:/" or "F:\"
+        .replace(/^[\\\/]+/, '')            // remove any remaining leading slashes
+        .replace(/\\/g, '/');              // normalise backslashes → forward slashes
+
       // Find the DataTable row for UI feedback
       DownloadManager._locateTableRow(item.trid);
 
       chrome.downloads.download(
         {
           url:            item.fileurl,
-          filename:       fullPath,
+          filename:       safeFilename,
           saveAs:         false,
           conflictAction: 'overwrite',
         },
@@ -365,6 +378,11 @@ const DownloadManager = {
     DownloadManager._poll.progressBar   = trid;
     DownloadManager._poll.videoRowIndex = rowIndex;
 
+    // Reset speed-tracking state for each new download
+    DownloadManager._poll.lastBytes    = 0;
+    DownloadManager._poll.lastTime     = 0;
+    DownloadManager._poll.speedSamples = [];
+
     // Robust active-page detection — data-dt-idx is unreliable in Bootstrap pagination.
     // Use DataTables' own fnPagingInfo() first, then fall back to row-index math.
     let currentPage = 0;
@@ -388,15 +406,18 @@ const DownloadManager = {
    */
   _cacheRowElements(trid) {
     const rows  = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-    const sel   = '[id*=' + trid + ']';
+    // Use exact-match attribute selector — substring (*=) would wrongly match
+    // row id="10" when looking for trid=1, id="11", etc.
+    const sel   = '[id="' + trid + '"]';
     const $row  = rows.filter(sel);
 
     DownloadManager._cachedRow = {
       trid,
       row:         $row,
-      progressDiv: $row.find('td').eq(3).find('div').filter('[class="progress"]'),
-      progressBar: $row.find('td').eq(3).find('div').filter('[class="progress-bar"]'),
-      downloadBtn: $row.find('td').eq(3).find('button'),
+      progressDiv: $row.find('.dl-progress'),
+      progressBar: $row.find('.dl-progress-bar'),
+      dlStats:     $row.find('.dl-stats'),
+      downloadBtn: $row.find('button.btn-download'),
     };
   },
 
@@ -412,10 +433,13 @@ const DownloadManager = {
       // Create the element if it doesn't exist
       $('#example').before(
         '<div id="overallProgress" class="overall-progress-bar">' +
+        '<div class="op-header">' +
         '<span id="overallProgressText"></span>' +
-        '<div class="progress" style="height:6px; flex:1; background:var(--glass-border);">' +
-        '<div id="overallProgressFill" class="progress-bar" role="progressbar" ' +
-        'style="width:0%; background: var(--brand-primary-light);"></div></div></div>'
+        '<span id="overallSpeedEta" class="op-speed-eta"></span>' +
+        '</div>' +
+        '<div class="progress op-track">' +
+        '<div id="overallProgressFill" class="progress-bar op-fill" role="progressbar" ' +
+        'style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div></div></div>'
       );
       $el = $('#overallProgress');
     }
@@ -428,33 +452,47 @@ const DownloadManager = {
 
   /** Updates the UI after a download finishes, is interrupted, or fails. @private */
   _onDownloadFinished(status = 'complete') {
-    const { row, downloadBtn, progressBar } = DownloadManager._cachedRow;
+    const { row } = DownloadManager._cachedRow;
 
     if (!row || row.length === 0) {
-      // Fallback to uncached lookup
       const rows = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-      const bar  = DownloadManager._poll.progressBar;
-      const sel  = '[id*=' + bar + ']';
-      DownloadManager._cachedRow.row         = rows.filter(sel);
-      DownloadManager._cachedRow.downloadBtn = rows.filter(sel).find('td').eq(3).find('button');
-      DownloadManager._cachedRow.progressBar = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress-bar"]');
+      const $r   = rows.filter('[id="' + DownloadManager._poll.progressBar + '"]');
+      DownloadManager._cachedRow.row         = $r;
+      DownloadManager._cachedRow.downloadBtn = $r.find('button.btn-download');
+      DownloadManager._cachedRow.progressBar = $r.find('.dl-progress-bar');
+      DownloadManager._cachedRow.dlStats     = $r.find('.dl-stats');
     }
 
-    const $btn = DownloadManager._cachedRow.downloadBtn;
-    const $bar = DownloadManager._cachedRow.progressBar;
-    const $row = DownloadManager._cachedRow.row;
+    const $btn   = DownloadManager._cachedRow.downloadBtn;
+    const $bar   = DownloadManager._cachedRow.progressBar;
+    const $stats = DownloadManager._cachedRow.dlStats;
+    const $row   = DownloadManager._cachedRow.row;
 
     if (status === 'complete') {
-      $btn.text('Downloaded');
-      $btn.removeClass('btn-warning btn-success').addClass('btn-danger');
-      $bar.css('width', '100%').css('background-color', 'var(--warning)').prop('disabled', true);
+      $btn.text('Downloaded ✓')
+          .removeClass('btn-warning btn-success dl-downloading')
+          .addClass('btn-danger dl-complete');
+      if ($bar)   $bar.css('width', '100%').addClass('dl-bar-complete');
+      if ($stats) {
+        $stats.show();
+        $stats.find('.dl-speed').text('Done');
+        $stats.find('.dl-eta').text('');
+      }
     } else if (status === 'failed') {
-      $btn.text('Failed');
-      $btn.removeClass('btn-warning btn-success').addClass('btn-danger');
-      $bar.css('width', '100%').css('background-color', '#dc3545').prop('disabled', true);
+      $btn.text('Failed ✗')
+          .removeClass('btn-warning btn-success dl-downloading')
+          .addClass('btn-danger dl-failed');
+      if ($bar)   $bar.css('width', '100%').addClass('dl-bar-failed');
+      if ($stats) {
+        $stats.show();
+        $stats.find('.dl-speed').text('Failed');
+        $stats.find('.dl-eta').text('');
+      }
     } else if (status === 'retrying') {
-      $btn.text('Retrying…');
-      $btn.removeClass('btn-success').addClass('btn-warning');
+      $btn.text('Retrying…')
+          .removeClass('btn-success dl-complete')
+          .addClass('btn-warning dl-retrying');
+      if ($stats) $stats.find('.dl-speed').text('Retrying…');
     }
 
     $row.removeClass('blink');
@@ -490,8 +528,8 @@ const DownloadManager = {
   // ── Progress polling ──────────────────────────────────────────────────────
 
   /**
-   * Queries chrome.downloads repeatedly while a download is active and
-   * updates the DataTable progress bar.
+   * Queries chrome.downloads repeatedly while a download is active.
+   * Updates: progress bar, downloaded/total size, live speed, ETA.
    * @private
    */
   _pollProgress(downId) {
@@ -502,45 +540,78 @@ const DownloadManager = {
     chrome.downloads.search({ id: poll.downId }, (items) => {
       items.forEach((item) => {
         if (item.state !== 'in_progress') return;
-
-        if (!item.totalBytes) return;
+        if (!item.totalBytes)             return;
 
         const pct = parseInt((item.bytesReceived / item.totalBytes) * 100, 10);
 
-        // ── FIX #15: Use cached DOM references ──────────────────────────
+        // ── Speed & ETA ────────────────────────────────────────────────
+        const now     = Date.now();
+        const deltaMs = now - (poll.lastTime  || now);
+        const deltaB  = item.bytesReceived - (poll.lastBytes || 0);
+
+        if (deltaMs > 50 && deltaB >= 0) {
+          poll.speedSamples.push((deltaB / deltaMs) * 1000);
+          if (poll.speedSamples.length > poll.MAX_SAMPLES) poll.speedSamples.shift();
+        }
+
+        const avgSpeed = poll.speedSamples.length
+          ? poll.speedSamples.reduce((a, b) => a + b, 0) / poll.speedSamples.length
+          : 0;
+
+        poll.lastBytes = item.bytesReceived;
+        poll.lastTime  = now;
+
+        const eta = avgSpeed > 0 ? (item.totalBytes - item.bytesReceived) / avgSpeed : 0;
+
+        // ── Resolve cached DOM refs ─────────────────────────────────────
         const cached = DownloadManager._cachedRow;
-        let pDiv, pBar, dlBtn;
+        let pDiv, pBar, dlStats, dlBtn;
 
-        if (cached.trid === poll.progressBar && cached.progressDiv) {
-          pDiv  = cached.progressDiv;
-          pBar  = cached.progressBar;
-          dlBtn = cached.downloadBtn;
+        if (cached.trid === poll.progressBar && cached.progressDiv && cached.progressDiv.length) {
+          pDiv    = cached.progressDiv;
+          pBar    = cached.progressBar;
+          dlStats = cached.dlStats;
+          dlBtn   = cached.downloadBtn;
         } else {
-          // Fallback to DOM lookup and re-cache
           const rows = $('#linkTable').dataTable().$('tr', { filter: 'applied' });
-          const sel  = '[id*=' + poll.progressBar + ']';
-          pDiv  = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress"]');
-          pBar  = rows.filter(sel).find('td').eq(3).find('div').filter('[class="progress-bar"]');
-          dlBtn = rows.filter(sel).find('td').eq(3).find('button');
-
+          const $r   = rows.filter('[id="' + poll.progressBar + '"]');
+          pDiv    = $r.find('.dl-progress');
+          pBar    = $r.find('.dl-progress-bar');
+          dlStats = $r.find('.dl-stats');
+          dlBtn   = $r.find('button.btn-download');
           DownloadManager._cachedRow.progressDiv = pDiv;
           DownloadManager._cachedRow.progressBar = pBar;
+          DownloadManager._cachedRow.dlStats     = dlStats;
           DownloadManager._cachedRow.downloadBtn = dlBtn;
         }
 
-        // First-time show
-        if (pDiv.is(':hidden')) {
+        // ── First-time reveal ───────────────────────────────────────────
+        if (pDiv && pDiv.length && pDiv.is(':hidden')) {
           pDiv.show();
-          pBar.show().css('background-color', 'var(--secondary)');
-          dlBtn.prop('disabled', true).text('Downloading').removeClass('btn-success').addClass('btn-warning');
+          if (dlBtn) {
+            dlBtn.prop('disabled', true)
+                 .text('Downloading…')
+                 .removeClass('btn-success')
+                 .addClass('btn-warning dl-downloading');
+          }
         }
 
-        // Update bar
-        pBar.css('width', pct + '%').text(pct + '%');
+        // ── Update bar ──────────────────────────────────────────────────
+        if (pBar && pBar.length) pBar.css('width', pct + '%').attr('aria-valuenow', pct);
+
+        // ── Update stats row ────────────────────────────────────────────
+        if (dlStats && dlStats.length) {
+          dlStats.show();
+          dlStats.find('.dl-size').text(
+            formatBytes(item.bytesReceived) + ' / ' + formatBytes(item.totalBytes)
+          );
+          dlStats.find('.dl-speed').text(avgSpeed > 0 ? formatSpeed(avgSpeed) : '—');
+          dlStats.find('.dl-eta').text(eta > 0 ? formatETA(eta) : '—');
+        }
 
         if (cached.row) cached.row.addClass('blink');
 
-        // Schedule next poll
+        // ── Schedule next poll ──────────────────────────────────────────
         if (poll.tid < 0) {
           poll.tid = setTimeout(() => {
             poll.tid = -1;
