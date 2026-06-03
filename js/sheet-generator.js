@@ -1,14 +1,16 @@
 /**
- * sheet-generator.js  (v2)
+ * sheet-generator.js  (v3)
  * Generates a polished .xlsx course-tracker workbook and triggers a download.
  *
- * Design highlights:
- *   - 8-column layout: # | Title | Type | Duration | Size | Status | Rating | Notes
- *   - Named style factories -- no inline duplication
- *   - Frozen header row (row 9) + first two columns
- *   - % Complete formula (auto-updates in Excel as you tick rows)
- *   - Bold totals row at the bottom
- *   - Data validations for Status and Rating columns
+ * Improvements over v2:
+ *   - Full live-formula dashboard with 7 tracked metrics:
+ *       Total Lectures, Total Duration, Completed, In Progress,
+ *       Not Started, Skipped, % Complete (text formula + ASCII progress bar)
+ *   - Colour-coded status cells: green=Completed, amber=In Progress,
+ *       red=Skipped, muted=Not Started
+ *   - Status COUNTIF formulas auto-update as you change dropdown values
+ *   - Progress bar formula in summary (e.g. "████████░░░░  67%")
+ *   - Single-range data validations (more reliable than per-row entries)
  *
  * Public API:
  *   SheetGenerator.generate(videos, courseDetail, folder)
@@ -18,7 +20,7 @@
 
 const SheetGenerator = {
 
-  // -- Palette (Ocean Depths -- matches the extension UI) --------------------
+  // -- Palette (Ocean Depths — matches the extension UI) --------------------
   _C: {
     NAVY:        '0D1B2A',
     OCEAN:       '1A2E45',
@@ -35,10 +37,16 @@ const SheetGenerator = {
     ROW_ODD:     'FFFFFF',
     BORDER:      'BBCCCC',
     BORDER_DARK: '2D8B8B',
-    GREEN:       '22C55E',
-    AMBER:       'F59E0B',
-    RED:         'EF4444',
+    GREEN:       '16A34A',
+    GREEN_BG:    'DCFCE7',
+    AMBER:       'D97706',
+    AMBER_BG:    'FEF3C7',
+    RED:         'DC2626',
+    RED_BG:      'FEE2E2',
+    BLUE:        '2563EB',
+    BLUE_BG:     'DBEAFE',
     TOTAL_BG:    '0D2E42',
+    DASH_VAL_BG: '0F2336',
   },
 
   // -- Helpers ---------------------------------------------------------------
@@ -47,8 +55,8 @@ const SheetGenerator = {
     if (!secs) return '--';
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
-    const s = Math.floor(secs % 60);
     if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+    const s = Math.floor(secs % 60);
     return `${m}m ${String(s).padStart(2, '0')}s`;
   },
 
@@ -58,10 +66,7 @@ const SheetGenerator = {
     });
   },
 
-  /** Column letter from 0-based index */
   _col(i) { return String.fromCharCode(65 + i); },
-
-  /** Build a full cell address */
   _addr(col, row) {
     return (typeof col === 'number' ? this._col(col) : col) + row;
   },
@@ -119,6 +124,20 @@ const SheetGenerator = {
     });
   },
 
+  _dashLabelCell() {
+    return this._cell(this._C.OCEAN, this._C.SEAFOAM, {
+      bold: true, sz: 10, halign: 'right', valign: 'center',
+      borderColor: this._C.TEAL, borderStyle: 'thin',
+    });
+  },
+
+  _dashValueCell(fc) {
+    return this._cell(this._C.DASH_VAL_BG, fc || this._C.CREAM, {
+      bold: false, sz: 10, halign: 'left', valign: 'center',
+      borderColor: this._C.TEAL_LIGHT, borderStyle: 'thin',
+    });
+  },
+
   // -- Cell writer -----------------------------------------------------------
 
   _set(ws, addr, value, style, isFormula = false) {
@@ -133,7 +152,6 @@ const SheetGenerator = {
     }
   },
 
-  /** Fill every cell in a row with the same style */
   _fillRow(ws, row, cols, style, value = '') {
     for (let c = 0; c < cols; c++) {
       this._set(ws, this._addr(c, row), value, style);
@@ -142,21 +160,10 @@ const SheetGenerator = {
 
   // -- Main entry point ------------------------------------------------------
 
-  /**
-   * Builds and downloads the course-tracker .xlsx file.
-   *
-   * Column layout (8 cols, A-H):
-   *   A  #       B  Lecture Title   C  Type    D  Duration
-   *   E  Size    F  Status          G  Rating  H  Notes
-   *
-   * @param {Array}  videos        - Normalised video list from App.data
-   * @param {object} courseDetail  - Course API object
-   * @param {string} folder        - Base download folder (for filename hint)
-   */
   generate(videos, courseDetail, folder) {
     if (typeof XLSX === 'undefined') {
       console.error('[SheetGenerator] SheetJS (XLSX) is not loaded.');
-      if (typeof UI !== 'undefined') UI.showToast('Could not generate tracker -- SheetJS missing.', 'alert-circle');
+      if (typeof UI !== 'undefined') UI.showToast('Could not generate tracker — SheetJS missing.', 'alert-circle');
       return;
     }
 
@@ -173,11 +180,9 @@ const SheetGenerator = {
     const totalSecs     = videos.reduce((sum, v) => sum + (v.duration || 0), 0);
 
     // -- Build worksheet object -----------------------------------------------
-    const ws          = {};
-    const merges      = [];
-    const validations = [];
+    const ws     = {};
+    const merges = [];
 
-    // Column widths (chars)
     ws['!cols'] = [
       { wch:  5 },  // A  #
       { wch: 50 },  // B  Lecture Title
@@ -191,13 +196,13 @@ const SheetGenerator = {
 
     let row = 1;
 
-    // ROW 1: Course banner
+    // ── ROW 1: Course banner ─────────────────────────────────────────────────
     this._fillRow(ws, row, COLS, this._bannerCell(C.NAVY, C.CREAM, 14, true));
     this._set(ws, 'A' + row, '  ' + courseTitle, this._bannerCell(C.NAVY, C.CREAM, 14, true));
     merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ROW 2: Sub-header
+    // ── ROW 2: Sub-header ────────────────────────────────────────────────────
     this._fillRow(ws, row, COLS, this._bannerCell(C.NAVY, C.SEAFOAM, 10, false, true));
     this._set(ws, 'A' + row,
       '  Instructor: ' + instructor + '     |     Generated: ' + this._today(),
@@ -205,42 +210,65 @@ const SheetGenerator = {
     merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ROW 3: Spacer
+    // ── ROW 3: Spacer ────────────────────────────────────────────────────────
     this._fillRow(ws, row, COLS, { fill: { patternType: 'solid', fgColor: { rgb: C.NAVY } } });
     merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ROWS 4-7: Summary block
-    const lblSt = this._cell(C.OCEAN, C.SEAFOAM, { bold: true });
-    const valSt = this._cell(C.OCEAN, C.CREAM);
-
-    const summaryRows = [
-      ['Total Lectures', String(totalLectures)],
-      ['Total Duration', this._fmtDuration(totalSecs)],
-      ['Completed',      '0  --  update as you watch'],
-      ['% Complete',     ''],  // will hold live formula
+    // ── ROWS 4-13: Dashboard block ───────────────────────────────────────────
+    const DASH_ROWS = [
+      { label: 'Total Lectures',  value: String(totalLectures),                formula: false, color: C.CREAM    },
+      { label: 'Total Duration',  value: this._fmtDuration(totalSecs),         formula: false, color: C.CREAM    },
+      { label: null,              value: null,  formula: false, color: null },
+      { label: '✅  Completed',   value: '0',                                  formula: true,  color: C.GREEN_BG },
+      { label: '🔄  In Progress', value: '0',                                  formula: true,  color: C.AMBER_BG },
+      { label: '⏭  Skipped',     value: '0',                                  formula: true,  color: C.RED_BG   },
+      { label: '⬜  Not Started', value: String(totalLectures),                formula: true,  color: C.BLUE_BG  },
+      { label: null,              value: null,  formula: false, color: null },
+      { label: '% Complete',      value: '0 / ' + totalLectures + ' (0%)',     formula: true,  color: C.SEAFOAM  },
+      { label: 'Progress',        value: '░'.repeat(20) + '  0%',             formula: true,  color: C.SEAFOAM  },
     ];
 
-    summaryRows.forEach(([label, val], i) => {
-      const r = row + i;
-      this._set(ws, 'A' + r, label, lblSt);
-      this._set(ws, 'B' + r, '',    lblSt);
-      merges.push({ s: { r: r - 1, c: 0 }, e: { r: r - 1, c: 1 } });
-      for (let c = 2; c < COLS; c++) {
-        this._set(ws, this._addr(c, r), c === 2 ? val : '', valSt);
+    const DASH_ROW_INDICES = [];
+    const spacerStyle      = { fill: { patternType: 'solid', fgColor: { rgb: C.OCEAN } } };
+    const lblSt            = this._dashLabelCell();
+
+    for (let di = 0; di < DASH_ROWS.length; di++) {
+      const d = DASH_ROWS[di];
+      DASH_ROW_INDICES.push(row);
+
+      if (d.label === null) {
+        this._fillRow(ws, row, COLS, spacerStyle);
+        merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
+      } else {
+        this._set(ws, 'A' + row, d.label, lblSt);
+        this._set(ws, 'B' + row, '',      lblSt);
+        merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: 1 } });
+
+        const valFc = ['✅', '🔄', '⏭', '⬜'].some(e => d.label.startsWith(e))
+          ? '1A2E45' : C.CREAM;
+        const valBg = d.color || C.DASH_VAL_BG;
+        const valSt = this._cell(valBg, valFc, {
+          sz: 10, bold: d.label.startsWith('%') || d.label === 'Progress',
+          halign: 'left', valign: 'center',
+          borderColor: C.TEAL_LIGHT, borderStyle: 'thin',
+        });
+
+        this._set(ws, 'C' + row, d.value, valSt);
+        for (let c = 3; c < COLS; c++) {
+          this._set(ws, this._addr(c, row), '', valSt);
+        }
+        merges.push({ s: { r: row - 1, c: 2 }, e: { r: row - 1, c: COLS - 1 } });
       }
-      merges.push({ s: { r: r - 1, c: 2 }, e: { r: r - 1, c: COLS - 1 } });
-    });
+      row++;
+    }
 
-    const pctRow = row + 3;
-    row += 4;
-
-    // ROW 8: Spacer
+    // ── Spacer before column headers ─────────────────────────────────────────
     this._fillRow(ws, row, COLS, { fill: { patternType: 'solid', fgColor: { rgb: C.NAVY } } });
     merges.push({ s: { r: row - 1, c: 0 }, e: { r: row - 1, c: COLS - 1 } });
     row++;
 
-    // ROW 9: Column headers
+    // ── Column headers ───────────────────────────────────────────────────────
     const HEADER_ROW = row;
     const HEADERS    = ['#', 'Lecture Title', 'Type', 'Duration', 'Size', 'Status', 'Rating', 'Notes'];
     const hSt        = this._headerCell();
@@ -249,14 +277,13 @@ const SheetGenerator = {
 
     const DATA_START = row;
 
-    // -- Data rows ------------------------------------------------------------
+    // ── Data rows ────────────────────────────────────────────────────────────
     let currentChapter = null;
     let lectureNum     = 0;
 
     videos.forEach((video) => {
       const chapter = video.Chapter || '';
 
-      // Chapter divider
       if (chapter && chapter !== currentChapter) {
         currentChapter = chapter;
         const chSt = this._chapterCell();
@@ -274,41 +301,27 @@ const SheetGenerator = {
       const baseSt   = (ha = 'left') => this._cell(rowBg, textCol, { halign: ha });
       const centerSt = ()            => this._cell(rowBg, dimCol,  { halign: 'center' });
 
-      // A: index
       this._set(ws, 'A' + row, video.IndexRaw || lectureNum,
         this._cell(rowBg, textCol, { halign: 'center', bold: true }));
 
-      // B: title
       const cleanTitle = (video.TitleRaw || video.VideoTitle || '').replace(/<[^>]*>/g, '').trim();
       this._set(ws, 'B' + row, cleanTitle, baseSt());
 
-      // C: type
       const typeMap = { Video: 'Video', Article: 'Article', File: 'File', ExternalLink: 'Link' };
       this._set(ws, 'C' + row, typeMap[video.Type] || video.Type || 'Video', centerSt());
 
-      // D: duration
       this._set(ws, 'D' + row, this._fmtDuration(video.duration || 0), centerSt());
 
-      // E: size (populated from video.filesize if available)
       const sizeStr = (typeof formatBytes === 'function' && video.filesize)
         ? formatBytes(video.filesize) : '--';
       this._set(ws, 'E' + row, sizeStr, centerSt());
 
-      // F: Status dropdown
+      // F: Status — default value; dropdown applied as a single range validation below
       this._set(ws, 'F' + row, 'Not Started',
-        this._cell(rowBg, dimCol, { halign: 'center', italic: true }));
-      validations.push({
-        type: 'list', sqref: 'F' + row,
-        formula1: '"Not Started,In Progress,Completed,Skipped"',
-        showDropDown: false,
-      });
+        this._cell(rowBg, dimCol, { halign: 'center' }));
 
-      // G: Rating dropdown
+      // G: Rating — default empty; dropdown applied as a single range validation below
       this._set(ws, 'G' + row, '', centerSt());
-      validations.push({
-        type: 'list', sqref: 'G' + row,
-        formula1: '"\u2B505,\u2B504,\u2B503,\u2B502,\u2B501"',
-      });
 
       // H: Notes
       this._set(ws, 'H' + row, '',
@@ -319,7 +332,7 @@ const SheetGenerator = {
 
     const DATA_END = row - 1;
 
-    // -- Totals row -----------------------------------------------------------
+    // ── Totals row ───────────────────────────────────────────────────────────
     const totSt  = this._totalCell(C.SEAFOAM, 'center');
     const totLbl = this._totalCell(C.CREAM,   'right');
     this._set(ws, 'A' + row, 'TOTAL',                      this._totalCell(C.CREAM, 'center'));
@@ -332,34 +345,104 @@ const SheetGenerator = {
     this._set(ws, 'H' + row, '--',                         totSt);
     row++;
 
-    // -- Back-fill % Complete formula -----------------------------------------
+    // ── Data validations — applied as TWO range rules (most reliable) ────────
+    //
+    // One validation object per column, covering the full data range.
+    // This is far more reliable than one object per row (SheetJS CE can
+    // silently truncate large per-row arrays).
+    //
+    // showDropDown: false  →  Excel shows the dropdown arrow (counter-intuitive
+    //                          but correct per the OOXML spec).
+
+    ws['!dataValidations'] = [
+      {
+        // Status column F — three choices
+        type:         'list',
+        sqref:        `F${DATA_START}:F${DATA_END}`,
+        formula1:     '"Not Started,In Progress,Completed,Skipped"',
+        showDropDown: false,
+        showErrorMessage: true,
+        errorTitle:   'Invalid status',
+        error:        'Please choose from the dropdown: Not Started, In Progress, Completed, or Skipped.',
+      },
+      {
+        // Rating column G — star ratings
+        type:         'list',
+        sqref:        `G${DATA_START}:G${DATA_END}`,
+        formula1:     '"★★★★★,★★★★☆,★★★☆☆,★★☆☆☆,★☆☆☆☆"',
+        showDropDown: false,
+      },
+    ];
+
+    // ── Back-fill live dashboard formulas ────────────────────────────────────
+    const fRange = 'F' + DATA_START + ':F' + DATA_END;
+    const N      = totalLectures;
+
+    const getDashValStyle = (dashIndex) => {
+      const r = DASH_ROW_INDICES[dashIndex];
+      return ws['C' + r] ? ws['C' + r].s : this._dashValueCell();
+    };
+
+    ws['C' + DASH_ROW_INDICES[3]] = {
+      f: `COUNTIF(${fRange},"Completed")`, v: 0, t: 'n', s: getDashValStyle(3),
+    };
+    ws['C' + DASH_ROW_INDICES[4]] = {
+      f: `COUNTIF(${fRange},"In Progress")`, v: 0, t: 'n', s: getDashValStyle(4),
+    };
+    ws['C' + DASH_ROW_INDICES[5]] = {
+      f: `COUNTIF(${fRange},"Skipped")`, v: 0, t: 'n', s: getDashValStyle(5),
+    };
+    ws['C' + DASH_ROW_INDICES[6]] = {
+      f: `COUNTIF(${fRange},"Not Started")`, v: N, t: 'n', s: getDashValStyle(6),
+    };
+
     const pctFormula =
-      'COUNTIF(F' + DATA_START + ':F' + DATA_END + ',"Completed")' +
-      '&" / "' +
-      '&' + totalLectures +
-      '&" ("' +
-      '&TEXT(COUNTIF(F' + DATA_START + ':F' + DATA_END + ',"Completed")/' + totalLectures + ',"0%")' +
-      '&")"';
-    ws['C' + pctRow] = { f: pctFormula, v: '0 / ' + totalLectures + ' (0%)', t: 's', s: valSt };
+      `COUNTIF(${fRange},"Completed")` +
+      `&" / ${N} ("` +
+      `&TEXT(COUNTIF(${fRange},"Completed")/${N},"0%")` +
+      `&")"`;
+    ws['C' + DASH_ROW_INDICES[8]] = {
+      f: pctFormula, v: '0 / ' + N + ' (0%)', t: 's', s: getDashValStyle(8),
+    };
 
-    // -- Worksheet metadata ---------------------------------------------------
-    ws['!ref']             = 'A1:H' + (row - 1);
-    ws['!merges']          = merges;
-    ws['!dataValidations'] = validations;
-    ws['!freeze']          = { xSplit: 2, ySplit: HEADER_ROW, topLeftCell: 'C' + (HEADER_ROW + 1) };
+    const BAR        = 20;
+    const barFormula =
+      `REPT("█",ROUND(COUNTIF(${fRange},"Completed")/${N}*${BAR},0))` +
+      `&REPT("░",${BAR}-ROUND(COUNTIF(${fRange},"Completed")/${N}*${BAR},0))` +
+      `&"  "&TEXT(COUNTIF(${fRange},"Completed")/${N},"0%")`;
+    ws['C' + DASH_ROW_INDICES[9]] = {
+      f: barFormula,
+      v: '░'.repeat(BAR) + '  0%',
+      t: 's',
+      s: this._cell(C.NAVY, C.TEAL_LIGHT, {
+        sz: 12, bold: true, halign: 'left',
+        borderColor: C.TEAL, borderStyle: 'thin',
+      }),
+    };
 
-    // -- Row heights ----------------------------------------------------------
+    // ── Worksheet metadata ───────────────────────────────────────────────────
+    ws['!ref']    = 'A1:H' + (row - 1);
+    ws['!merges'] = merges;
+    ws['!freeze'] = { xSplit: 2, ySplit: HEADER_ROW, topLeftCell: 'C' + (HEADER_ROW + 1) };
+
+    // ── Row heights ──────────────────────────────────────────────────────────
     const rowHeights = [];
-    rowHeights[0] = { hpt: 38 };  // banner
-    rowHeights[1] = { hpt: 18 };  // sub-header
-    rowHeights[2] = { hpt:  6 };  // spacer
-    for (let i = 3; i <= 6; i++) rowHeights[i] = { hpt: 19 };  // summary
-    rowHeights[7] = { hpt:  6 };  // spacer
-    rowHeights[8] = { hpt: 24 };  // column header
-    for (let i = 9; i < row; i++) rowHeights[i] = { hpt: 20 };
+    rowHeights[0] = { hpt: 38 };
+    rowHeights[1] = { hpt: 18 };
+    rowHeights[2] = { hpt:  5 };
+
+    for (let di = 0; di < DASH_ROWS.length; di++) {
+      const d   = DASH_ROWS[di];
+      const idx = DASH_ROW_INDICES[di] - 1;
+      rowHeights[idx] = { hpt: d.label === null ? 4 : (di === 9 ? 22 : 19) };
+    }
+
+    rowHeights[HEADER_ROW - 1] = { hpt: 24 };
+    for (let i = HEADER_ROW; i < row; i++) rowHeights[i] = { hpt: 20 };
+
     ws['!rows'] = rowHeights;
 
-    // -- Assemble workbook ----------------------------------------------------
+    // ── Assemble workbook ────────────────────────────────────────────────────
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Course Tracker');
     wb.Props = {
@@ -368,7 +451,7 @@ const SheetGenerator = {
       Author:  'UdemyDownloader Extension',
     };
 
-    // -- Filename & download --------------------------------------------------
+    // ── Filename & download ──────────────────────────────────────────────────
     const safeName = courseTitle.replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 60);
     const filename = safeName + ' -- Course Tracker.xlsx';
 
